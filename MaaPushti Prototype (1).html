@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MaaPushti Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* VOICE everyday, warm and clear: a working service, not a pitch
+   IDEA the actual tools of the service: a feature phone in the mother's hand, a health worker's register, a shopkeeper's khata
+   PICTURE the feature phone with a live Bangla voice call and keypad, beside its transcript
+   COLOUR white ground, deep teal band from the abstract and cover, coral accent, danger red for alerts only
+   TYPE Hind Siliguri for both Bangla and English
+   LAYOUT teal band with title and three tabs; each view opens on its working tool; phone and transcript side by side, stacked on a phone */
+:root{color-scheme:light dark;--bg:light-dark(#ffffff,#0c1716);--ink:light-dark(#14211f,#e8efed);--mut:light-dark(#566664,#9fb2af);--teal:#0f5c5a;--teal2:light-dark(#0f5c5a,#5fb8b2);--coral:#e07a5f;--red:light-dark(#b8321f,#ff8a75);--line:light-dark(#dfe6e4,#22312f);--soft:light-dark(#f2f7f6,#13221f);--card:light-dark(#ffffff,#10201e)}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.55 "Hind Siliguri",system-ui,sans-serif;overflow-x:clip}
+button,input,select{font:inherit}
+.top{background:var(--teal);color:#fff;padding:22px max(5vw,16px) 0}
+.top .row{max-width:1240px;margin:0 auto;display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 24px}
+h1{font-size:clamp(30px,4vw,42px);line-height:1.05;letter-spacing:-.02em;margin:0;font-weight:700}
+.top p{margin:4px 0 0;color:#cfe6e3;font-size:15px}
+nav{max-width:1240px;margin:18px auto 0;display:flex;flex-wrap:wrap;gap:4px}
+nav a{color:#e4f1ef;text-decoration:none;padding:10px 16px;border-radius:10px 10px 0 0;font-weight:600;min-height:44px;display:flex;align-items:center;gap:8px}
+nav a:hover{background:rgba(255,255,255,.1)}
+nav a.on{background:var(--bg);color:var(--ink)}
+nav a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--coral);outline-offset:2px}
+.badge{background:var(--coral);color:#fff;border-radius:99px;font-size:13px;padding:0 8px;line-height:22px}
+.reset{background:transparent;border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer;min-height:44px}
+main{max-width:1240px;margin:0 auto;padding:28px max(5vw,16px) 48px}
+.view{display:none}.view.on{display:block}
+h2{font-size:24px;line-height:1.15;margin:0 0 6px;letter-spacing:-.01em}
+h3{font-size:17px;margin:0 0 10px}
+.sub{color:var(--mut);margin:0 0 20px;max-width:70ch}
+.note{color:var(--mut);font-size:13px}
+.grid{display:grid;grid-template-columns:340px minmax(0,1fr);gap:28px;align-items:start}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+.soft{background:var(--soft);border:0}
+.phone{width:300px;margin:0 auto;background:linear-gradient(160deg,#2c3a39,#121a19);border-radius:46px 46px 60px 60px;padding:26px 20px 30px;box-shadow:0 18px 0 -10px rgba(0,0,0,.18);position:relative}
+.phone:before{content:"";display:block;width:60px;height:6px;border-radius:6px;background:#0a0f0f;margin:0 auto 14px}
+.scr{background:linear-gradient(180deg,#d9efe9,#b9dcd3);border-radius:10px;height:190px;padding:12px 14px;color:#10302c;display:flex;flex-direction:column;border:4px solid #0a0f0f}
+.scr .bar{display:flex;justify-content:space-between;font-size:13px;opacity:.8}
+.scr .who{font-size:22px;font-weight:700;margin-top:10px;line-height:1.1}
+.scr .st{font-size:15px;margin-top:4px}
+.scr .big{margin-top:auto;font-size:44px;font-weight:700;line-height:1;text-align:right;min-height:44px}
+.ring .scr{animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{50%{background:linear-gradient(180deg,#fbe3da,#f2c3b4)}}
+@media(prefers-reduced-motion:reduce){.ring .scr{animation:none}}
+.calls{display:flex;justify-content:space-between;margin:16px 4px 10px}
+.calls button{width:76px;height:44px;border-radius:22px;border:0;cursor:pointer;color:#fff;font-weight:700}
+.ans{background:#2f9e6a}.end{background:#c9402b}
+.calls button:disabled{opacity:.35;cursor:default}
+.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.keys button{height:48px;border-radius:14px;border:0;background:linear-gradient(180deg,#3d4c4b,#2a3534);color:#f1f6f5;font-size:20px;font-weight:600;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+.keys button:active{transform:translateY(1px);background:#1c2524}
+.keys small{display:block;font-size:13px;color:#9fb2af;font-weight:400;line-height:1}
+.under{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:16px}
+.btn{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:9px 14px;cursor:pointer;min-height:44px;font-weight:600}
+.btn:hover{border-color:var(--teal2)}
+.btn.pri{background:var(--teal);border-color:var(--teal);color:#fff}
+.btn.co{background:var(--coral);border-color:var(--coral);color:#fff}
+.tog{display:flex;align-items:center;gap:8px;font-size:15px;color:var(--mut)}
+.tog input{width:20px;height:20px;accent-color:var(--teal)}
+.tx{display:flex;flex-direction:column;gap:10px;max-height:430px;overflow-y:auto;padding-right:4px}
+.ln{border-left:3px solid var(--teal2);padding:4px 0 4px 12px;animation:in .3s ease-out}
+.ln.m{border-color:var(--coral)}.ln.d{border-color:var(--red)}
+@keyframes in{from{opacity:0;transform:translateY(4px)}}
+@media(prefers-reduced-motion:reduce){.ln{animation:none}}
+.ln .w{font-size:13px;color:var(--mut);font-weight:600}
+.ln .bn{font-size:17px}
+.ln .en{font-size:14px;color:var(--mut)}
+.empty{color:var(--mut);padding:18px 0}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px}
+.sign{border:1px solid var(--line);border-radius:12px;padding:10px;text-align:center;background:var(--card)}
+.sign svg{width:54px;height:54px;display:block;margin:0 auto 4px}
+.sign .n{display:inline-block;background:var(--teal);color:#fff;border-radius:99px;width:28px;line-height:28px;font-weight:700}
+.sign .l{font-size:14px;line-height:1.25;margin-top:4px}
+.sign .l span{display:block;color:var(--mut);font-size:13px}
+.fam{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:12px}
+.fam .panel p{margin:6px 0}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;margin-top:24px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(10em,1fr));gap:12px;margin-bottom:20px}
+.kpi{padding:14px 16px;border-radius:12px;background:var(--soft)}
+.kpi b{display:block;font-size:clamp(30px,4vw,40px);line-height:1;font-variant-numeric:tabular-nums}
+.kpi span{font-size:14px;color:var(--mut)}
+.kpi.hot{background:color-mix(in srgb,var(--red) 12%,var(--bg))}.kpi.hot b{color:var(--red)}
+.alert{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;padding:12px 14px;border-radius:12px;border:1px solid color-mix(in srgb,var(--red) 40%,var(--line));background:color-mix(in srgb,var(--red) 6%,var(--bg));margin-bottom:8px}
+.alert.done{border-color:var(--line);background:var(--soft);opacity:.75}
+.alert b{color:var(--red)}.alert.done b{color:var(--mut)}
+.tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:18px 0 12px}
+.chip{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:99px;padding:6px 14px;min-height:40px;cursor:pointer}
+.chip.on{background:var(--teal);color:#fff;border-color:var(--teal)}
+.tools input{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:8px 12px;min-height:44px;flex:1 1 200px;max-width:320px}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th{text-align:left;font-size:13px;color:var(--mut);font-weight:600;border-bottom:1px solid var(--line);padding:8px 10px}
+td{border-bottom:1px solid var(--line);padding:10px;vertical-align:middle}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tag{display:inline-block;border-radius:99px;padding:1px 10px;font-size:13px;font-weight:600;white-space:nowrap}
+.t-ok{background:var(--soft);color:var(--teal2)}.t-red{background:color-mix(in srgb,var(--red) 14%,var(--bg));color:var(--red)}.t-co{background:color-mix(in srgb,var(--coral) 18%,var(--bg));color:light-dark(#9a4329,#ffb39d)}
+.tri{display:flex;height:34px;border-radius:8px;overflow:hidden;margin:8px 0 6px}
+.tri div{display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:600;white-space:nowrap}
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:14px;color:var(--mut)}
+.basket li{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--line)}
+.basket{list-style:none;margin:0;padding:0}
+.basket .tot{font-weight:700;border-bottom:0;font-size:18px}
+form .f{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+form label{font-size:14px;color:var(--mut);font-weight:600}
+select,form input{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:9px 12px;min-height:44px;font-size:16px}
+.pre{display:flex;gap:6px;flex-wrap:wrap}
+.due{color:var(--red);font-weight:600}
+.log{list-style:none;margin:0;padding:0;font-size:15px}
+.log li{padding:6px 0;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px}
+body.en-only .bn{display:none!important}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:10px;font-size:15px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:calc(100% - 32px)}
+.toast.on{opacity:1}
+@media(max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}.two{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:600px){table{font-size:14px}th,td{padding:6px 4px}.stack thead{display:none}.stack tr{display:grid;padding-block:10px;border-bottom:1px solid var(--line)}.stack td{display:flex;justify-content:space-between;gap:12px;border:0;padding:3px 0;text-align:right}.stack td::before{content:attr(data-l);color:var(--mut);font-size:13px;text-align:left}.phone{width:min(300px,100%)}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="row">
+    <div>
+      <h1>MaaPushti</h1>
+      <p>Working prototype · pilot area: Tongibari, Munshiganj</p>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><label class="tog" style="color:#e4f1ef"><input type="checkbox" id="eng"> English only</label><button class="reset" id="reset" type="button">Reset demo</button></div>
+  </div>
+  <nav id="nav">
+    <a href="#mother" data-v="mother">Mother's phone</a>
+    <a href="#worker" data-v="worker">Health worker <span class="badge" id="nb">0</span></a>
+    <a href="#shop" data-v="shop">Shopkeeper</a>
+  </nav>
+</header>
+
+<main>
+<section class="view" id="v-mother">
+  <h2>A weekly voice call, no reading needed</h2>
+  <p class="sub">Shirin is 24 weeks pregnant and owns a basic phone. Press the green button to answer her call, then reply with the keypad as she would. A danger sign reaches the health worker's dashboard at once.</p>
+  <div class="grid">
+    <div>
+      <div class="phone" id="phone">
+        <div class="scr">
+          <div class="bar"><span>Signal ▮▮▮</span><span id="clock">10:30</span></div>
+          <div class="who" id="who">Shirin Akter</div>
+          <div class="st" id="st">Week 24 call due</div>
+          <div class="big" id="big"></div>
+        </div>
+        <div class="calls">
+          <button class="ans" id="ans" type="button" aria-label="Answer call">Answer</button>
+          <button class="end" id="end" type="button" aria-label="End call" disabled>End</button>
+        </div>
+        <div class="keys" id="keys"></div>
+      </div>
+      <div class="under">
+        <button class="btn" id="miss" type="button">Give a free missed call</button>
+        <label class="tog"><input type="checkbox" id="speak"> Speak aloud</label>
+      </div>
+      <p class="note" id="vnote" style="text-align:center;margin:6px 0 0"></p>
+    </div>
+    <div class="panel">
+      <h3>Call transcript</h3>
+      <div class="tx" id="tx"><div class="empty">The call has not started. Answer it on the phone.</div></div>
+    </div>
+  </div>
+  <div class="two">
+    <div>
+      <h3>Picture card given at registration</h3>
+      <p class="note" style="margin:-4px 0 10px">Each danger sign has a number to press during calls.</p>
+      <div class="cards" id="cards"></div>
+    </div>
+    <div>
+      <h3>Messages for the family decision-makers</h3>
+      <p class="note" style="margin:-4px 0 0">Sent the same week to the husband's and mother-in-law's phones.</p>
+      <div class="fam" id="fam"></div>
+    </div>
+  </div>
+</section>
+
+<section class="view" id="v-worker">
+  <h2 id="wh">Health worker dashboard</h2>
+  <p class="sub">Community health worker for Betka, Sonarang, Autshahi, Abdullapur and Dighirpar unions.</p>
+  <div class="kpis" id="kpis"></div>
+  <h3>Danger-sign alerts</h3>
+  <div id="alerts"></div>
+  <div class="panel soft" style="margin-top:18px">
+    <h3 style="margin:0">Mothers by trimester</h3>
+    <div class="tri" id="tri"></div>
+    <div class="legend" id="leg"></div>
+  </div>
+  <div class="tools">
+    <span id="chips"></span>
+    <input id="q" type="search" placeholder="Search name or village" aria-label="Search mothers">
+  </div>
+  <div class="scroll"><table class="stack" id="mt"></table></div>
+  <p class="note">Sample data for demonstration.</p>
+</section>
+
+<section class="view" id="v-shop">
+  <h2>Rahima Store, Betka bazar</h2>
+  <p class="sub">The shop sells the weekly Pushti Basket. Families pay in small amounts through mobile money or cash, and each sale shows on the health worker's dashboard.</p>
+  <div class="kpis" id="skpis"></div>
+  <div class="two" style="margin-top:0">
+    <div class="panel">
+      <h3>Record a sale or instalment</h3>
+      <form id="sf">
+        <div class="f"><label for="sm">Mother</label><select id="sm"></select></div>
+        <div class="f"><label for="sk">Type</label>
+          <select id="sk"><option value="basket">New basket given (৳280 added to due)</option><option value="pay">Instalment received</option></select></div>
+        <div class="f"><label for="sa">Amount received (৳)</label><input id="sa" type="number" min="0" step="10" value="70" inputmode="numeric"></div>
+        <div class="pre" style="margin-bottom:14px"><button class="chip" type="button" data-a="40">৳40</button><button class="chip" type="button" data-a="70">৳70</button><button class="chip" type="button" data-a="140">৳140</button><button class="chip" type="button" data-a="280">Full ৳280</button></div>
+        <div class="f"><label for="sp">Paid by</label><select id="sp"><option>bKash</option><option>Nagad</option><option>Cash</option></select></div>
+        <button class="btn pri" type="submit">Save entry</button>
+      </form>
+    </div>
+    <div class="panel soft">
+      <h3>This week's Pushti Basket</h3>
+      <ul class="basket" id="bk"></ul>
+      <p class="note">Shop keeps 10% of each basket. Prices are sample figures.</p>
+      <h3 style="margin-top:18px">Recent entries</h3>
+      <ul class="log" id="log"></ul>
+    </div>
+  </div>
+  <h3 style="margin-top:28px">Khata: dues by family</h3>
+  <div class="scroll"><table class="stack" id="kt"></table></div>
+</section>
+</main>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+{
+const $=id=>document.getElementById(id);
+const PRICE=280, KEY='maapushti-v1';
+const BASKET=[["Eggs ×7","ডিম",105],["Red lentils 500 g","মসুর ডাল",65],["Leafy greens, 2 bunches","লাল শাক / পালং",40],["Small fish 250 g","ছোট মাছ",70]];
+const SIGNS=[
+ {n:1,bn:"রক্তপাত",en:"Bleeding",svg:'<path d="M27 6C20 18 14 26 14 34a13 13 0 0 0 26 0c0-8-6-16-13-28z" fill="#c9402b"/><path d="M21 34a6 6 0 0 0 6 6" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/> '},
+ {n:2,bn:"হাত-পা-মুখ ফোলা",en:"Swelling",svg:'<rect x="17" y="16" width="20" height="30" rx="10" fill="#e07a5f"/><path d="M8 31h6M40 31h6M10 26l4 3M44 26l-4 3" stroke="currentColor" stroke-width="3" stroke-linecap="round"/> '},
+ {n:3,bn:"তীব্র মাথাব্যথা / খিঁচুনি",en:"Severe headache or fits",svg:'<circle cx="27" cy="31" r="15" fill="#e07a5f"/><path d="M15 10l6 6-5 2 7 6" stroke="#c9402b" stroke-width="3" fill="none" stroke-linejoin="round"/><path d="M21 34q6 4 12 0" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/> '},
+ {n:4,bn:"জ্বর",en:"Fever",svg:'<rect x="22" y="6" width="10" height="30" rx="5" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="27" cy="40" r="9" fill="#c9402b"/><rect x="25" y="18" width="4" height="20" fill="#c9402b"/> '},
+ {n:5,bn:"বাচ্চার নড়াচড়া কম",en:"Baby moving less",svg:'<ellipse cx="27" cy="30" rx="17" ry="19" fill="#e07a5f"/><circle cx="31" cy="23" r="6" fill="#fff"/><path d="M22 33q4 9 13 6" stroke="#fff" stroke-width="5" fill="none" stroke-linecap="round"/> '}];
+const VILL=["Betka","Sonarang","Autshahi","Abdullapur","Dighirpar"];
+const day=o=>{const d=new Date();d.setDate(d.getDate()+o);return d.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'})};
+const seed=()=>({mothers:[["Shirin Akter",0,24,1,true,0,0],["Rokeya Begum",1,31,3,true,2,420],["Nasima Khatun",2,12,6,true,1,280],["Moriom Akter",3,36,-2,false,3,700],["Taslima Begum",4,18,9,true,1,140],["Sumi Akter",0,28,-1,false,2,350],["Hosneara Begum",1,9,12,true,0,0],["Jesmin Akter",2,33,4,true,3,840],["Laboni Akter",3,21,7,false,1,280],["Farzana Akter",0,15,10,true,1,210],["Rupa Begum",4,38,2,true,4,1050],["Khadija Akter",1,26,5,true,2,560]].map((m,i)=>({id:i,name:m[0],v:VILL[m[1]],wk:m[2],anc:m[3],ans:m[4],bk:m[5],paid:m[6]})),alerts:[{m:1,s:2,t:"Today, 08:12",done:false},{m:7,s:5,t:"Yesterday, 17:40",done:false},{m:10,s:1,t:"Mon, 11:05",done:true}],log:[{m:7,a:140,k:"pay",p:"bKash",t:"Today, 09:20"},{m:1,a:0,k:"basket",p:"",t:"Today, 08:55"},{m:4,a:70,k:"pay",p:"Cash",t:"Yesterday, 18:10"}]});
+let S;
+try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){}
+if(!S||!S.mothers)S=seed();
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+const now=()=>"Today, "+new Date().toTimeString().slice(0,5);
+const toast=t=>{const e=$('toast');e.textContent=t;e.classList.add('on');clearTimeout(toast.h);toast.h=setTimeout(()=>e.classList.remove('on'),2600)};
+const tk=n=>"৳"+n.toLocaleString('en-IN');
+
+const views=['mother','worker','shop'];
+const show=()=>{const v=views.includes(location.hash.slice(1))?location.hash.slice(1):'mother';views.forEach(x=>{$('v-'+x).classList.toggle('on',x===v)});document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('on',a.dataset.v===v))};
+window.addEventListener('hashchange',show);
+
+let st='idle',timer=null,secs=0;
+const tx=$('tx');
+const voices=()=>{try{return speechSynthesis.getVoices().filter(v=>/^bn/i.test(v.lang))}catch(e){return[]}};
+const say=bn=>{if(!$('speak').checked)return;try{const u=new SpeechSynthesisUtterance(bn);const v=voices()[0];if(v)u.voice=v;u.lang='bn-BD';u.rate=.9;speechSynthesis.speak(u)}catch(e){}};
+const line=(who,bn,en,c='')=>{if(tx.querySelector('.empty'))tx.innerHTML='';tx.insertAdjacentHTML('beforeend',`<div class="ln ${c}"><div class="w">${who}</div>${bn?`<div class="bn">${bn}</div>`:''}<div class="en">${en}</div></div>`);tx.scrollTop=tx.scrollHeight;if(bn&&c!=='m')say(bn)};
+const scr=(s,b='')=>{$('st').textContent=s;$('big').textContent=b};
+const tick=()=>{secs++;const m=String(secs/60|0).padStart(2,'0'),s=String(secs%60).padStart(2,'0');if(st!=='idle'&&st!=='over')$('st').textContent='On call '+m+':'+s};
+const L={greet:["আসসালামু আলাইকুম, শিরিন আপা। মা-পুষ্টি থেকে বলছি। আপনার গর্ভাবস্থার ২৪তম সপ্তাহ চলছে।","Assalamu alaikum, Shirin apa. This is MaaPushti. You are now in week 24 of your pregnancy."],tip:["এই সপ্তাহে প্রতিদিন একটি ডিম, এক বাটি ডাল আর সবুজ শাক খান। আয়রন ট্যাবলেট খেতে ভুলবেন না।","This week, eat one egg, a bowl of dal and green leafy vegetables every day. Do not forget your iron tablet."],ask:["আপনার কি কোনো সমস্যা আছে? রক্তপাত হলে ১, হাত-পা-মুখ ফুলে গেলে ২, তীব্র মাথাব্যথা বা খিঁচুনি হলে ৩, জ্বর হলে ৪, বাচ্চার নড়াচড়া কমে গেলে ৫ চাপুন। কোনো সমস্যা না থাকলে ৯ চাপুন। নিজের কথা বলতে চাইলে ০ চাপুন।","Any problems? Press 1 for bleeding, 2 for swelling, 3 for severe headache or fits, 4 for fever, 5 if the baby moves less. Press 9 if all is well. Press 0 to speak."],alert:["আপনার স্বাস্থ্যকর্মীকে এখনই জানানো হয়েছে। তিনি শিগগিরই আপনার সাথে যোগাযোগ করবেন। বেশি খারাপ লাগলে দেরি না করে নিকটস্থ স্বাস্থ্যকেন্দ্রে যান।","Your health worker has been told right now and will contact you soon. If you feel worse, go to the nearest health centre without delay."],fine:["শুনে ভালো লাগলো, আলহামদুলিল্লাহ।","Glad to hear that."],rec:["বিপের পর আপনার সমস্যার কথা বলুন।","Speak about your problem after the beep."],anc:["আপনার পরবর্তী চেকআপ "+"বৃহস্পতিবার, বেতকা কমিউনিটি ক্লিনিকে। মনে থাকলে ১ চাপুন, আবার শুনতে ২ চাপুন।","Your next checkup is on Thursday at Betka community clinic. Press 1 if you will remember, 2 to hear it again."],bye:["ধন্যবাদ। ভালো থাকবেন। আগামী সপ্তাহে আবার কথা হবে।","Thank you. Take care. We will talk again next week."]};
+const sys=k=>line('MaaPushti voice',L[k][0],L[k][1]);
+const answer=()=>{if(st!=='idle'&&st!=='ring')return;$('phone').classList.remove('ring');tx.innerHTML='';secs=0;clearInterval(timer);timer=setInterval(tick,1000);st='ask';$('ans').disabled=true;$('end').disabled=false;$('miss').disabled=true;$('who').textContent='MaaPushti';scr('On call 00:00');sys('greet');setTimeout(()=>sys('tip'),700);setTimeout(()=>sys('ask'),1400)};
+const hang=(silent)=>{clearInterval(timer);if(st!=='idle'&&st!=='over'&&!silent)line('Call','','Call ended by mother.','m');st='over';try{speechSynthesis.cancel()}catch(e){}$('phone').classList.remove('ring');$('ans').disabled=false;$('ans').textContent='Again';$('end').disabled=true;$('miss').disabled=false;$('who').textContent='Shirin Akter';scr('Call ended');};
+const press=k=>{$('big').textContent=k;if(st==='ask'){const s=SIGNS.find(x=>String(x.n)===k);if(s){line('Shirin pressed '+k,'',s.en,'m');addAlert(0,s.n);setTimeout(()=>{line('System','','Alert sent to health worker dashboard.','d');sys('alert')},400);setTimeout(()=>{sys('anc');st='anc'},1100)}else if(k==='9'){line('Shirin pressed 9','','All is well.','m');setTimeout(()=>sys('fine'),300);setTimeout(()=>{sys('anc');st='anc'},900)}else if(k==='0'){line('Shirin pressed 0','','Wants to speak.','m');sys('rec');st='rec';scr('Recording…','●');setTimeout(()=>{line('Shirin (voice, 0:06)','আমার কয়েকদিন ধরে খুব দুর্বল লাগে, মাথা ঘোরে।','"I have felt very weak and dizzy for a few days." (recording sent to health worker)','m');addAlert(0,0);$('big').textContent='';setTimeout(()=>{sys('anc');st='anc'},600)},2200)}}else if(st==='anc'){if(k==='1'){line('Shirin pressed 1','','Will remember the checkup.','m');sys('bye');st='over';setTimeout(()=>hang(true),1200);const m=S.mothers[0];m.ans=true;save();renderWorker()}else if(k==='2'){line('Shirin pressed 2','','Repeat.','m');sys('anc')}}};
+const KEYS=[["1",""],["2","abc"],["3","def"],["4","ghi"],["5","jkl"],["6","mno"],["7","pqrs"],["8","tuv"],["9","wxyz"],["*",""],["0","+"],["#",""]];
+$('keys').innerHTML=KEYS.map(k=>`<button type="button" data-k="${k[0]}">${k[0]}<small>${k[1]||'&nbsp;'}</small></button>`).join('');
+$('keys').addEventListener('click',e=>{const b=e.target.closest('button');if(b)press(b.dataset.k)});
+$('ans').addEventListener('click',()=>{if(st==='over'){st='idle'}answer()});
+$('end').addEventListener('click',()=>hang());
+$('miss').addEventListener('click',()=>{if(st==='ring'||(st!=='idle'&&st!=='over'))return;st='idle';$('who').textContent='Shirin Akter';scr('Missed call sent. Free call-back…');setTimeout(()=>{st='ring';$('phone').classList.add('ring');$('who').textContent='MaaPushti';scr('Incoming call');$('ans').textContent='Answer';$('ans').disabled=false},1500)});
+$('speak').addEventListener('change',()=>{if($('speak').checked&&!voices().length)$('vnote').textContent='This browser has no Bangla voice, so it may read with another voice. The real service uses recorded Bangla audio.';else $('vnote').textContent=''});
+setInterval(()=>{$('clock').textContent=new Date().toTimeString().slice(0,5)},10000);$('clock').textContent=new Date().toTimeString().slice(0,5);
+
+$('cards').innerHTML=SIGNS.map(s=>`<div class="sign"><svg viewBox="0 0 54 54" aria-hidden="true">${s.svg}</svg><span class="n">${s.n}</span><div class="l"><span class="bn" style="display:inline;color:inherit;font-size:14px">${s.bn}</span><span>${s.en}</span></div></div>`).join('');
+const FAM=[["Husband, Jamal","আপনার স্ত্রী এখন গর্ভাবস্থার ২৪তম সপ্তাহে। এই সময় তার প্রতিদিন একটি ডিম, ডাল আর শাক দরকার। বৃহস্পতিবার তাকে চেকআপে নিয়ে যান।","Your wife is in week 24. She needs an egg, dal and greens every day now. Please take her for her checkup on Thursday."],["Mother-in-law, Amena","আপনার পুত্রবধূর এখন বাড়তি খাবার দরকার। তাকে সবার সাথে একসাথে খেতে দিন, আর ভারী কাজ থেকে বিরত রাখুন।","Your daughter-in-law needs extra food now. Let her eat together with everyone, and keep her away from heavy work."]];
+$('fam').innerHTML=FAM.map((f,i)=>`<div class="panel"><b>${f[0]}</b><p class="bn" style="font-size:16px">${f[1]}</p><p class="note">${f[2]}</p><button class="btn" type="button" data-f="${i}">Play message</button></div>`).join('');
+$('fam').addEventListener('click',e=>{const b=e.target.closest('[data-f]');if(!b)return;$('speak').checked=true;say(FAM[b.dataset.f][1]);setTimeout(()=>{$('speak').checked=false},100);toast('Playing message to '+FAM[b.dataset.f][0].split(',')[0].toLowerCase())});
+
+let filt='all';
+const FILTERS=[["all","All"],["alert","Open alert"],["missed","Missed checkup"],["t3","3rd trimester"],["noans","Call not answered"]];
+const addAlert=(m,s)=>{S.alerts.unshift({m,s,t:now(),done:false});save();renderWorker();toast('New alert on the health worker dashboard')};
+const signName=s=>s===0?'Voice message: weak and dizzy':SIGNS.find(x=>x.n===s).en;
+const open=m=>S.alerts.some(a=>a.m===m&&!a.done);
+const renderWorker=()=>{const M=S.mothers,oa=S.alerts.filter(a=>!a.done).length,miss=M.filter(m=>m.anc<0).length,ans=M.filter(m=>m.ans).length;$('nb').textContent=oa;$('nb').style.display=oa?'':'none';$('kpis').innerHTML=[[M.length,'Mothers registered',''],[oa,'Open danger alerts',oa?'hot':''],[miss,'Missed checkups',''],[Math.round(ans/M.length*100)+'%','Answered this week\'s call',''],[M.reduce((t,m)=>t+m.bk,0),'Pushti Baskets bought','']].map(k=>`<div class="kpi ${k[2]}"><b>${k[0]}</b><span>${k[1]}</span></div>`).join('');$('alerts').innerHTML=S.alerts.length?S.alerts.map((a,i)=>{const m=M[a.m];return`<div class="alert ${a.done?'done':''}"><div><b>${signName(a.s)}</b> · ${m.name}, ${m.v} · week ${m.wk}<div class="note">${a.t} · ${a.done?'Visited':'Call or visit today'}</div></div>${a.done?'':`<button class="btn co" type="button" data-al="${i}">Mark visited</button>`}</div>`}).join(''):'<p class="empty">No alerts.</p>';const t=[M.filter(m=>m.wk<=13).length,M.filter(m=>m.wk>13&&m.wk<=27).length,M.filter(m=>m.wk>27).length],c=['#5fb8b2','#0f5c5a','#e07a5f'],n=['1st (≤13 wk)','2nd (14–27 wk)','3rd (28+ wk)'];$('tri').innerHTML=t.map((x,i)=>x?`<div style="width:${x/M.length*100}%;background:${c[i]}">${x}</div>`:'').join('');$('leg').innerHTML=n.map((x,i)=>`<span><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${c[i]};margin-right:6px"></i>${x}: ${t[i]}</span>`).join('');$('chips').innerHTML=FILTERS.map(f=>`<button class="chip ${filt===f[0]?'on':''}" type="button" data-fl="${f[0]}">${f[1]}</button>`).join(' ');const q=$('q').value.trim().toLowerCase();const rows=M.filter(m=>(filt==='all'||filt==='alert'&&open(m.id)||filt==='missed'&&m.anc<0||filt==='t3'&&m.wk>27||filt==='noans'&&!m.ans)&&(!q||(m.name+' '+m.v).toLowerCase().includes(q))).sort((a,b)=>open(b.id)-open(a.id)||(b.anc<0)-(a.anc<0)||a.anc-b.anc);$('mt').innerHTML='<thead><tr><th>Mother</th><th>Village</th><th class="num">Week</th><th>Status</th><th>Next checkup</th><th>This week\'s call</th><th class="num">Baskets</th></tr></thead><tbody>'+ (rows.length?rows.map(m=>`<tr><td data-l="Mother"><b>${m.name}</b></td><td data-l="Village">${m.v}</td><td class="num" data-l="Week">${m.wk}</td><td data-l="Status">${open(m.id)?'<span class="tag t-red">Danger sign</span>':m.anc<0?'<span class="tag t-co">Missed checkup</span>':'<span class="tag t-ok">On track</span>'}</td><td data-l="Next checkup" style="white-space:nowrap">${m.anc<0?'<span class="due">Overdue '+(-m.anc)+'d</span>':day(m.anc)}</td><td data-l="This week\'s call">${m.ans?'Answered':'<span class="due">No answer</span>'}</td><td class="num" data-l="Baskets">${m.bk}</td></tr>`).join(''):'<tr><td colspan="7" class="empty">No mothers match.</td></tr>')+'</tbody>'};
+$('alerts').addEventListener('click',e=>{const b=e.target.closest('[data-al]');if(!b)return;S.alerts[b.dataset.al].done=true;save();renderWorker();toast('Marked as visited')});
+$('chips').addEventListener('click',e=>{const b=e.target.closest('[data-fl]');if(!b)return;filt=b.dataset.fl;renderWorker()});
+$('q').addEventListener('input',renderWorker);
+
+const renderShop=()=>{const M=S.mothers,sold=M.reduce((t,m)=>t+m.bk,0),paid=M.reduce((t,m)=>t+m.paid,0),due=sold*PRICE-paid;$('skpis').innerHTML=[[sold,'Baskets sold'],[tk(paid),'Collected'],[tk(due),'Still due'],[tk(Math.round(sold*PRICE*.1)),'Shop margin (10%)']].map(k=>`<div class="kpi"><b>${k[0]}</b><span>${k[1]}</span></div>`).join('');$('bk').innerHTML=BASKET.map(b=>`<li><span>${b[0]} <span class="note bn">${b[1]}</span></span><span class="num">${tk(b[2])}</span></li>`).join('')+`<li class="tot"><span>Total per week</span><span>${tk(PRICE)}</span></li>`;$('log').innerHTML=S.log.slice(0,6).map(l=>`<li><span>${M[l.m].name} · ${l.k==='basket'?'basket given':'paid '+tk(l.a)+' by '+l.p}</span><span class="note" style="white-space:nowrap">${l.t}</span></li>`).join('');const sel=$('sm').value;$('sm').innerHTML=M.map(m=>`<option value="${m.id}">${m.name}, ${m.v}</option>`).join('');if(sel)$('sm').value=sel;$('kt').innerHTML='<thead><tr><th>Family</th><th>Village</th><th class="num">Baskets</th><th class="num">Paid</th><th class="num">Due</th></tr></thead><tbody>'+ [...M].sort((a,b)=>(b.bk*PRICE-b.paid)-(a.bk*PRICE-a.paid)).map(m=>{const d=m.bk*PRICE-m.paid;return`<tr><td data-l="Family"><b>${m.name}</b></td><td data-l="Village">${m.v}</td><td class="num" data-l="Baskets">${m.bk}</td><td class="num" data-l="Paid">${tk(m.paid)}</td><td class="num" data-l="Due">${d>0?`<span class="due">${tk(d)}</span>`:'Clear'}</td></tr>`}).join('')+'</tbody>'};
+document.querySelector('.pre').addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(b){$('sa').value=b.dataset.a;$('sk').value='pay'}});
+$('sk').addEventListener('change',()=>{if($('sk').value==='basket')$('sa').value=0});
+$('sf').addEventListener('submit',e=>{e.preventDefault();const m=S.mothers[+$('sm').value],k=$('sk').value,a=Math.max(0,+$('sa').value||0);if(k==='basket'){m.bk++;S.log.unshift({m:m.id,a:0,k,p:'',t:now()});if(a>0){m.paid+=a;S.log.unshift({m:m.id,a,k:'pay',p:$('sp').value,t:now()})}toast('Basket recorded for '+m.name)}else{if(!a){toast('Enter an amount');return}m.paid+=a;S.log.unshift({m:m.id,a,k,p:$('sp').value,t:now()});toast(tk(a)+' received from '+m.name)}save();renderShop();renderWorker()});
+
+const setEng=v=>{document.body.classList.toggle('en-only',v);$('eng').checked=v;try{localStorage.setItem('mp-eng',v?'1':'')}catch(e){}};
+$('eng').addEventListener('change',()=>setEng($('eng').checked));try{if(localStorage.getItem('mp-eng'))setEng(true)}catch(e){}
+$('reset').addEventListener('click',()=>{S=seed();save();hang(true);st='idle';$('ans').textContent='Answer';scr('Week 24 call due');tx.innerHTML='<div class="empty">The call has not started. Answer it on the phone.</div>';renderWorker();renderShop();toast('Demo reset')});
+
+renderWorker();renderShop();show();
+}
+</script>
+</body>
+</html>
