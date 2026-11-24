@@ -10,12 +10,14 @@
   // ---------------- Supabase mode ----------------
   function supabaseApi() {
     const sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
-    let me = null;
+    let me = null, lastErr = "";
     const chk = r => { if (r.error) throw new Error(r.error.message); return r.data; };
     async function loadMe() {
       const { data } = await sb.auth.getUser();
       if (!data || !data.user) { me = null; return null; }
       const p = await sb.from("profiles").select("*").eq("id", data.user.id).maybeSingle();
+      if (p.error) { lastErr = "Signed in, but your profile could not be read: " + p.error.message; me = null; return null; }
+      lastErr = p.data ? (p.data.active ? "" : "This account has been turned off by the admin.") : "This account has no access yet (no profile row for user " + data.user.id + "). Ask the admin to set it up.";
       me = p.data && p.data.active ? p.data : null;
       return me;
     }
@@ -26,7 +28,7 @@
       async signIn(phone, password) {
         chk(await sb.auth.signInWithPassword({ email: toEmail(phone), password }));
         const p = await loadMe();
-        if (!p) { await sb.auth.signOut(); throw new Error("This account has no access yet. Ask the admin to set it up."); }
+        if (!p) { await sb.auth.signOut(); throw new Error(lastErr || "This account has no access yet. Ask the admin to set it up."); }
         return p;
       },
       async signOut() { await sb.auth.signOut(); me = null; },
