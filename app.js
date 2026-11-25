@@ -7,10 +7,10 @@
   const SIGNS = ["Bleeding", "Swelling of hands, feet or face", "Severe headache or fits", "Fever", "Baby moving less"];
   const ROLE = { admin: "Admin", maa_bondhu: "Maa Bondhu", shopkeeper: "Shopkeeper", doctor: "Gynecologist" };
   const TABS = {
-    admin: [["overview", "Overview"], ["users", "Users"], ["mothers", "Mothers"], ["consults", "Consultations"], ["ivr", "Phone demo"]],
-    maa_bondhu: [["home", "My mothers"], ["register", "Register mother"], ["doctors", "Doctors"], ["consults", "Consultations"], ["ivr", "Phone demo"]],
-    shopkeeper: [["record", "Record sale"], ["ledger", "Khata"]],
-    doctor: [["requests", "Requests"], ["history", "History"], ["profile", "My profile"]]
+    admin: [["overview", "Overview"], ["users", "Users"], ["mothers", "Mothers"], ["consults", "Consultations"], ["ivr", "Phone demo"], ["me", "My profile"]],
+    maa_bondhu: [["home", "My mothers"], ["register", "Register mother"], ["doctors", "Doctors"], ["consults", "Consultations"], ["ivr", "Phone demo"], ["me", "My profile"]],
+    shopkeeper: [["record", "Record sale"], ["ledger", "Khata"], ["me", "My profile"]],
+    doctor: [["requests", "Requests"], ["history", "History"], ["me", "My profile"]]
   };
   let D = { profiles: [], mothers: [], alerts: [], activity: [], sales: [], consults: [], customers: [] };
   let filt = "all", q = "", unsub = null, openMother = null, seenReq = new Set();
@@ -34,6 +34,45 @@
   const guard = async (fn, msg) => { try { const r = await fn(); if (msg) toast(msg); return r; } catch (e) { toast(e.message || "Something went wrong"); console.error(e); } };
   const form = f => Object.fromEntries(new FormData(f).entries());
   const tag = (t, c) => `<span class="pill ${c}">${esc(t)}</span>`;
+  const callNo = p => (p && (p.contact_phone || p.phone)) || "";
+  const loc = p => [p.union_name, p.upazila, p.district].filter(Boolean).join(", ") || p.area || "";
+  const av = (p, n = 40) => p && p.photo ? `<img class="av" src="${esc(p.photo)}" alt="" width="${n}" height="${n}" style="width:${n}px;height:${n}px">`
+    : `<span class="av" style="width:${n}px;height:${n}px;font-size:${Math.round(n * .4)}px">${esc(((p && p.full_name) || "?").replace(/^Dr\.?\s*/, "").split(" ").map(w => w[0]).slice(0, 2).join(""))}</span>`;
+
+  // ---------- Division > District > Upazila > Union ----------
+  let GEO = null;
+  const geo = async () => { if (!GEO) GEO = await fetch("geo.json").then(r => r.json()); return GEO; };
+  const geoBlock = () => `<div class="f"><label>Division</label><select name="division" aria-label="Division"></select></div>
+    <div class="f"><label>District</label><select name="district" aria-label="District"></select></div>
+    <div class="f"><label>Upazila</label><select name="upazila" aria-label="Upazila"></select></div>
+    <div class="f"><label>Union</label><select name="union_name" aria-label="Union"></select></div>`;
+  function bindGeo(root, v = {}) {
+    const G = GEO; if (!G) return;
+    const el = n => root.querySelector(`[name=${n}]`), dv = el("division"), ds = el("district"), uz = el("upazila"), un = el("union_name");
+    const fill = (e, items, cur, ph) => { e.innerHTML = `<option value="">${ph}</option>` + items.map(n => `<option ${n === cur ? "selected" : ""}>${esc(n)}</option>`).join(""); e.disabled = !items.length; };
+    const divId = () => (G.divisions.find(d => d[1] === dv.value) || [])[0];
+    const disId = () => (G.districts.find(d => d[2] === ds.value && d[1] === divId()) || [])[0];
+    const upzId = () => (G.upazilas.find(u => u[2] === uz.value && u[1] === disId()) || [])[0];
+    const fDis = c => fill(ds, G.districts.filter(d => d[1] === divId()).map(d => d[2]).sort(), c, "Select district");
+    const fUpz = c => fill(uz, G.upazilas.filter(u => u[1] === disId()).map(u => u[2]).sort(), c, "Select upazila");
+    const fUni = c => fill(un, G.unions.filter(u => u[0] === upzId()).map(u => u[1]).sort(), c, un.options && upzId() ? "Select union" : "Select union");
+    fill(dv, G.divisions.map(d => d[1]).sort(), v.division, "Select division"); fDis(v.district); fUpz(v.upazila); fUni(v.union_name);
+    dv.onchange = () => { fDis(); fUpz(); fUni(); }; ds.onchange = () => { fUpz(); fUni(); }; uz.onchange = () => fUni();
+  }
+  function geoCheck(root, needUnion) {
+    const el = n => root.querySelector(`[name=${n}]`);
+    for (const [n, l] of [["division", "division"], ["district", "district"], ["upazila", "upazila"]]) if (!el(n).value) return "Please select the " + l + ".";
+    if (needUnion && !el("union_name").disabled && !el("union_name").value) return "Please select the union.";
+    return "";
+  }
+  const areaOf = v => v.union_name ? v.union_name + ", " + v.upazila : [v.upazila, v.district].filter(Boolean).join(", ");
+  const toPhoto = file => new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => { const S = 320, c = document.createElement("canvas"); c.width = c.height = S; const k = Math.min(img.width, img.height);
+      c.getContext("2d").drawImage(img, (img.width - k) / 2, (img.height - k) / 2, k, k, 0, 0, S, S); URL.revokeObjectURL(img.src); res(c.toDataURL("image/jpeg", 0.82)); };
+    img.onerror = () => rej(new Error("Could not read that picture. Try a JPG or PNG."));
+    img.src = URL.createObjectURL(file);
+  });
 
   function status(m) {
     if (openAlerts(m.id).length) return tag("Danger sign", "t-red");
@@ -77,7 +116,7 @@
     const badge = k => { const n = k === "home" || k === "overview" ? D.alerts.filter(a => a.status === "open").length : k === "requests" ? D.consults.filter(c => c.status === "requested" && c.doctor_id === u.id).length : 0; return n ? ` <span class="badge">${n}</span>` : ""; };
     app.innerHTML = `${api.mode === "test" ? `<div class="testbar">Test mode: sample data stored only in this browser. <a href="#" id="rst">Reset sample data</a></div>` : ""}
       <header class="top"><div class="row"><div class="brand">MaaPushti</div>
-      <div class="who"><span><b>${esc(u.full_name)}</b></span><span class="pill">${ROLE[u.role]}</span><button class="btn sm" id="lo" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.4)">Sign out</button></div></div>
+      <div class="who"><a href="#me" style="display:flex;align-items:center;gap:8px;color:inherit;text-decoration:none">${av(u, 32)}<b>${esc(u.full_name)}</b></a><span class="pill">${ROLE[u.role]}</span><button class="btn sm" id="lo" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.4)">Sign out</button></div></div>
       <nav>${TABS[u.role].map(([k, l]) => `<a href="#${k}" class="${k === t ? "on" : ""}">${l}${badge(k)}</a>`).join("")}</nav></header>
       <main id="main">${body}</main>`;
     $("#lo").onclick = async () => { if (unsub) unsub(); await api.signOut(); loginView(); };
@@ -88,10 +127,10 @@
     if (!me()) return loginView();
     const t = tab(), r = me().role;
     const V = {
-      admin: { overview: adminOverview, users: adminUsers, mothers: adminMothers, consults: consultsView, ivr: ivrView },
-      maa_bondhu: { home: mbHome, register: registerView, doctors: doctorsView, consults: consultsView, ivr: ivrView },
-      shopkeeper: { record: shopRecord, ledger: shopLedger },
-      doctor: { requests: docRequests, history: docHistory, profile: docProfile }
+      admin: { overview: adminOverview, users: adminUsers, mothers: adminMothers, consults: consultsView, ivr: ivrView, me: profileView },
+      maa_bondhu: { home: mbHome, register: registerView, doctors: doctorsView, consults: consultsView, ivr: ivrView, me: profileView },
+      shopkeeper: { record: shopRecord, ledger: shopLedger, me: profileView },
+      doctor: { requests: docRequests, history: docHistory, me: profileView }
     };
     shell(V[r][t]());
     bind[t] && bind[t]();
@@ -211,7 +250,7 @@
       await guard(() => api.addActivity({ mother_id: v.mother_id, kind: "note", note: "Started " + v.mode + " consultation with " + pName(v.doctor_id) }));
       await guard(load);
       modal(`<h1>Call started</h1><p>${esc(pName(c.doctor_id))} has been notified. If the call didn't open, use the button below.</p>
-        <div class="acts"><a class="btn co" href="${url}" target="_blank" rel="noopener">Open ${c.mode} call</a><a class="btn" href="${telHref((byId(D.profiles, c.doctor_id) || {}).phone)}">Phone the doctor</a></div>`);
+        <div class="acts"><a class="btn co" href="${url}" target="_blank" rel="noopener">Open ${c.mode} call</a><a class="btn" href="${telHref(callNo(byId(D.profiles, c.doctor_id)))}">Phone the doctor</a></div>`);
     };
   }
 
@@ -290,9 +329,10 @@
   function doctorsView() {
     const docs = D.profiles.filter(p => p.role === "doctor");
     return `<h1>Gynecologists</h1><p class="sub">Call a doctor directly, or start a video or audio consultation while you are with a mother.</p>
-      ${docs.length ? `<div class="cards">${docs.map(d => `<div class="card"><b style="font-size:18px">${esc(d.full_name)}</b> ${d.available ? tag("Available", "t-ok") : tag("Busy", "t-mut")}
-        <div class="note">${esc(d.specialty || "Gynecologist")}<br>${esc(d.hospital || "")}${d.bmdc_no ? "<br>BMDC reg. " + esc(d.bmdc_no) : ""}</div>
-        <div class="acts" style="margin-top:10px"><button class="btn co sm" data-consult="" data-doc="${d.id}">Video or audio consult</button><a class="btn sm" href="${telHref(d.phone)}">Phone call</a></div></div>`).join("")}</div>` : `<p class="empty">No doctors yet. The admin adds them.</p>`}`;
+      ${docs.length ? `<div class="cards">${docs.map(d => `<div class="card"><div style="display:flex;gap:12px;align-items:center">${av(d, 56)}<div><b style="font-size:18px">${esc(d.full_name)}</b> ${d.available ? tag("Available", "t-ok") : tag("Busy", "t-mut")}
+        <div class="note">${esc(d.specialty || "Gynecologist")}</div></div></div>
+        <div class="note" style="margin-top:6px">${esc(d.hospital || "")}${loc(d) ? "<br>" + esc(loc(d)) : ""}${d.bmdc_no ? "<br>BMDC reg. " + esc(d.bmdc_no) : ""}</div>
+        <div class="acts" style="margin-top:10px"><button class="btn co sm" data-consult="" data-doc="${d.id}">Video or audio consult</button><a class="btn sm" href="${telHref(callNo(d))}">Phone call</a></div></div>`).join("")}</div>` : `<p class="empty">No doctors yet. The admin adds them.</p>`}`;
   }
 
   // ---------- phone demo (mother's side) ----------
@@ -349,7 +389,7 @@
         <div class="f"><label for="u2">Full name *</label><input id="u2" name="full_name" required></div>
         <div class="f"><label for="u3">Mobile number (login) *</label><input id="u3" name="phone" inputmode="tel" required placeholder="01XXXXXXXXX" pattern="0?1[0-9]{9}"></div>
         <div class="f"><label for="u4">Password * (min 6)</label><input id="u4" name="password" required minlength="6"></div>
-        <div class="f" data-for="maa_bondhu shopkeeper"><label for="u5">Area / union</label><input id="u5" name="area"></div>
+        <div class="f full" data-for="maa_bondhu shopkeeper doctor"><div class="fgrid">${geoBlock()}</div></div>
         <div class="f" data-for="shopkeeper"><label for="u6">Shop name</label><input id="u6" name="shop_name"></div>
         <div class="f" data-for="doctor"><label for="u7">Specialty</label><input id="u7" name="specialty" value="Gynecologist and obstetrician"></div>
         <div class="f" data-for="doctor"><label for="u8">Hospital or chamber</label><input id="u8" name="hospital"></div>
@@ -357,19 +397,22 @@
         <div><button class="btn pri">Create login</button></div></form>
       <h2>All users (${P.length})</h2><div class="scroll"><table class="stack"><thead><tr><th>Name</th><th>Role</th><th>Phone (login)</th><th>Details</th><th class="num">Mothers</th><th>Status</th><th></th></tr></thead><tbody>
       ${P.map(p => `<tr><td data-l="Name"><b>${esc(p.full_name)}</b></td><td data-l="Role">${ROLE[p.role]}</td><td data-l="Phone">${esc(p.phone)}</td>
-        <td data-l="Details">${esc(p.shop_name || p.hospital || p.area || "")}</td><td class="num" data-l="Mothers">${p.role === "maa_bondhu" ? D.mothers.filter(m => m.maa_bondhu_id === p.id).length : p.role === "shopkeeper" ? D.mothers.filter(m => m.shop_id === p.id).length : ""}</td>
+        <td data-l="Details">${[p.shop_name || p.hospital, loc(p)].filter(Boolean).map(esc).join("<br>")}</td><td class="num" data-l="Mothers">${p.role === "maa_bondhu" ? D.mothers.filter(m => m.maa_bondhu_id === p.id).length : p.role === "shopkeeper" ? D.mothers.filter(m => m.shop_id === p.id).length : ""}</td>
         <td data-l="Status">${p.active ? tag("Active", "t-ok") : tag("Turned off", "t-mut")}</td>
-        <td data-l="">${p.id !== me().id ? `<button class="btn sm" data-tog="${p.id}">${p.active ? "Turn off" : "Turn on"}</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+        <td data-l=""><div class="acts"><button class="btn sm" data-edit="${p.id}">Edit</button>${p.id !== me().id ? `<button class="btn sm" data-tog="${p.id}">${p.active ? "Turn off" : "Turn on"}</button>` : ""}</div></td></tr>`).join("")}</tbody></table></div>`;
   }
   bind.users = () => {
     const f = $("#uf");
     const sync = () => document.querySelectorAll("[data-for]").forEach(x => x.hidden = !x.dataset.for.split(" ").includes(f.role.value));
-    f.role.onchange = sync; sync();
+    f.role.onchange = sync; sync(); bindGeo(f);
     f.onsubmit = async e => {
       e.preventDefault(); const v = form(f); v.phone = v.phone.replace(/\D/g, "");
+      if (v.role !== "admin") { const err = geoCheck(f, v.role !== "doctor"); if (err) return toast(err); v.area = areaOf(v); }
+      else ["division", "district", "upazila", "union_name"].forEach(k => delete v[k]);
       const u = await guard(() => api.createUser(v)); if (!u) return;
       toast(`Login created. ${u.full_name} signs in with ${u.phone} and the password you set.`); await guard(load); render();
     };
+    document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => editUserModal(b.dataset.edit));
     document.querySelectorAll("[data-tog]").forEach(b => b.onclick = async () => { const p = byId(D.profiles, b.dataset.tog); await guard(() => api.updateProfile(p.id, { active: !p.active }), p.active ? "Login turned off" : "Login turned on"); await refresh(); });
   };
   function adminMothers() {
@@ -434,7 +477,7 @@
     return `<div class="card" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
       <div><b style="font-size:18px">${esc(m.full_name)}</b> · week ${m.edd ? week(m.edd) : "-"} · ${esc(m.village || "")} ${tag(c.status, c.status === "requested" ? "t-red" : c.status === "done" ? "t-ok" : "t-co")}
       <div class="note">${c.mode === "video" ? "Video" : "Audio"} call requested ${ago(c.created_at)} by ${esc(mb.full_name || "Maa Bondhu")}</div></div>
-      ${active ? `<div class="acts"><a class="btn co" href="${meetUrl(c, me().full_name)}" target="_blank" rel="noopener" data-join="${c.id}">Join ${c.mode} call</a>${mb.phone ? `<a class="btn" href="${telHref(mb.phone)}">Phone Maa Bondhu</a>` : ""}</div>` : ""}</div>
+      ${active ? `<div class="acts"><a class="btn co" href="${meetUrl(c, me().full_name)}" target="_blank" rel="noopener" data-join="${c.id}">Join ${c.mode} call</a>${callNo(mb) ? `<a class="btn" href="${telHref(callNo(mb))}">Phone Maa Bondhu</a>` : ""}</div>` : ""}</div>
       <p><b>Reason:</b> ${esc(c.reason || "-")}</p>
       ${m.risk_notes ? `<p><b>Health notes:</b> ${esc(m.risk_notes)}</p>` : ""}${al.length ? `<p><b style="color:var(--red)">Open danger signs:</b> ${al.map(a => esc(a.sign)).join(", ")}</p>` : ""}
       <p class="note">Age ${esc(m.age || "-")} · Pregnancy no. ${esc(m.gravida || "-")} · Due ${fmtD(m.edd)} · <a href="#" data-open="${m.id}">Full history</a></p>
@@ -457,23 +500,62 @@
     const list = D.consults.filter(c => c.doctor_id === me().id && ["done", "declined"].includes(c.status));
     return `<h1>History</h1><p class="sub">Consultations you have finished.</p>${list.length ? list.map(c => consultCard(c, false)).join("") : `<p class="empty">No finished consultations yet.</p>`}`;
   }
-  function docProfile() {
+  // ---------- profiles ----------
+  const roleFields = p => p.role === "doctor" ? `<div class="f"><label for="e5">Specialty</label><input id="e5" name="specialty" value="${esc(p.specialty || "")}"></div>
+      <div class="f"><label for="e6">Hospital or chamber</label><input id="e6" name="hospital" value="${esc(p.hospital || "")}"></div>
+      <div class="f"><label for="e7">BMDC registration no.</label><input id="e7" name="bmdc_no" value="${esc(p.bmdc_no || "")}"></div>`
+    : p.role === "shopkeeper" ? `<div class="f"><label for="e8">Shop name</label><input id="e8" name="shop_name" value="${esc(p.shop_name || "")}"></div>` : "";
+  function profileView() {
     const u = me();
-    return `<h1>My profile</h1><p class="sub">Maa Bondhus see these details when choosing a doctor.</p>
-      <form class="grid card" id="pf">
-        <div class="f"><label for="p1">Full name</label><input id="p1" name="full_name" value="${esc(u.full_name)}" required></div>
-        <div class="f"><label for="p2">Specialty</label><input id="p2" name="specialty" value="${esc(u.specialty || "")}"></div>
-        <div class="f"><label for="p3">Hospital or chamber</label><input id="p3" name="hospital" value="${esc(u.hospital || "")}"></div>
-        <div class="f"><label for="p4">BMDC registration no.</label><input id="p4" name="bmdc_no" value="${esc(u.bmdc_no || "")}"></div>
-        <div class="f"><label>Login phone</label><input value="${esc(u.phone)}" disabled></div>
-        <div><button class="btn pri">Save profile</button></div></form>
-      <div class="kpis" style="margin-top:16px"><div class="kpi"><b>${D.consults.filter(c => c.doctor_id === u.id && c.status === "done").length}</b><span>Consultations finished</span></div><div class="kpi"><b>${new Set(D.consults.filter(c => c.doctor_id === u.id).map(c => c.mother_id)).size}</b><span>Mothers helped</span></div></div>`;
+    const stats = u.role === "doctor" ? `<div class="kpis" style="margin-top:16px"><div class="kpi"><b>${D.consults.filter(c => c.doctor_id === u.id && c.status === "done").length}</b><span>Consultations finished</span></div><div class="kpi"><b>${new Set(D.consults.filter(c => c.doctor_id === u.id).map(c => c.mother_id)).size}</b><span>Mothers helped</span></div></div>` : "";
+    return `<h1>My profile</h1><p class="sub">${u.role === "doctor" ? "Maa Bondhus see these details when choosing a doctor." : "Keep your photo and contact numbers up to date."}</p>
+      <div class="card" style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">${av(u, 112)}
+        <div><b style="font-size:20px">${esc(u.full_name)}</b><div class="note">${ROLE[u.role]}${loc(u) ? " · " + esc(loc(u)) : ""}</div>
+        <div class="acts" style="margin-top:10px"><label class="btn sm" for="ph" style="color:var(--ink)">Change photo</label><input id="ph" type="file" accept="image/*" hidden>${u.photo ? `<button class="btn sm" id="phx">Remove photo</button>` : ""}</div></div></div>
+      <h2>Details you can change</h2>
+      <form class="grid card" id="mf">
+        <div class="f"><label for="e1">Full name</label><input id="e1" name="full_name" value="${esc(u.full_name)}" required></div>
+        <div class="f"><label for="e2">Contact number</label><input id="e2" name="contact_phone" inputmode="tel" value="${esc(u.contact_phone || u.phone)}" required pattern="0?1[0-9]{9}"></div>
+        <div class="f"><label for="e3">Alternate number</label><input id="e3" name="alt_phone" inputmode="tel" value="${esc(u.alt_phone || "")}" pattern="0?1[0-9]{9}"></div>
+        ${roleFields(u)}
+        <div><button class="btn pri">Save changes</button></div></form>
+      <h2>Account details</h2>
+      <div class="card kv" style="margin:0"><div><span>Login ID (phone)</span>${esc(u.phone)} 🔒</div><div><span>User ID</span><code style="font-size:13px">${esc(u.id.slice(0, 8))}</code> 🔒</div>
+        <div><span>Role</span>${ROLE[u.role]} 🔒</div><div><span>Location</span>${esc(loc(u) || "-")} 🔒</div></div>
+      <p class="note">🔒 These can't be changed here. Your login ID stays the same; ask the admin to change your role or location.</p>
+      <h2>Change password</h2>
+      <form class="grid card" id="pw"><div class="f"><label for="w1">New password (min 6)</label><input id="w1" name="p1" type="password" minlength="6" autocomplete="new-password" required></div>
+        <div class="f"><label for="w2">Type it again</label><input id="w2" name="p2" type="password" minlength="6" autocomplete="new-password" required></div>
+        <div><button class="btn">Change password</button></div></form>${stats}`;
   }
-  bind.profile = () => { const f = $("#pf"); f.onsubmit = async e => { e.preventDefault(); await guard(() => api.updateProfile(me().id, form(f)), "Profile saved"); render(); }; };
+  bind.me = () => {
+    const u = me();
+    $("#ph").onchange = async e => { const f = e.target.files[0]; if (!f) return; const ph = await guard(() => toPhoto(f)); if (!ph) return; await guard(() => api.updateProfile(u.id, { photo: ph }), "Photo updated"); await guard(load); render(); };
+    const x = $("#phx"); if (x) x.onclick = async () => { await guard(() => api.updateProfile(u.id, { photo: null }), "Photo removed"); await guard(load); render(); };
+    $("#mf").onsubmit = async e => { e.preventDefault(); const v = form(e.target); v.contact_phone = v.contact_phone.replace(/\D/g, ""); v.alt_phone = v.alt_phone ? v.alt_phone.replace(/\D/g, "") : null;
+      await guard(() => api.updateProfile(u.id, v), "Profile saved"); await guard(load); render(); };
+    $("#pw").onsubmit = async e => { e.preventDefault(); const v = form(e.target); if (v.p1 !== v.p2) return toast("The two passwords don't match.");
+      const ok = await guard(() => api.changePassword(v.p1), "Password changed"); e.target.reset(); };
+  };
+  function editUserModal(id) {
+    const p = byId(D.profiles, id); if (!p) return;
+    const el = modal(`<h1>Edit ${esc(p.full_name)}</h1><p class="sub">${ROLE[p.role]} · login ID ${esc(p.phone)} (can't be changed)</p>
+      <form class="grid" id="ef">
+        <div class="f"><label for="x1">Full name</label><input id="x1" name="full_name" value="${esc(p.full_name)}" required></div>
+        <div class="f"><label for="x2">Contact number</label><input id="x2" name="contact_phone" inputmode="tel" value="${esc(p.contact_phone || p.phone)}"></div>
+        <div class="f"><label for="x3">Alternate number</label><input id="x3" name="alt_phone" inputmode="tel" value="${esc(p.alt_phone || "")}"></div>
+        ${roleFields(p)}${p.role !== "admin" ? `<div class="f full"><div class="fgrid">${geoBlock()}</div></div>` : ""}
+        <div><button class="btn pri">Save</button></div></form>`);
+    const f = el.querySelector("#ef"); if (p.role !== "admin") bindGeo(f, p);
+    f.onsubmit = async e => { e.preventDefault(); const v = form(f);
+      if (p.role !== "admin") { const err = geoCheck(f, p.role !== "doctor"); if (err) return toast(err); v.area = areaOf(v); }
+      await guard(() => api.updateProfile(id, v), "Saved"); await guard(load); closeModal(); };
+  }
 
   // ---------- boot ----------
   async function start() {
     await guard(load);
+    if (me().role === "admin") await geo().catch(() => toast("Could not load the area list."));
     seenReq = new Set(D.consults.map(c => c.id));
     render();
     if (unsub) unsub();

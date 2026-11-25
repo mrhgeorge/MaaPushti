@@ -51,6 +51,10 @@ SUPABASE_ANON_KEY: "eyJ...",
 
 The anon key is meant to be public. Security comes from the database rules in `schema.sql`, not from hiding the key. Never put the **service_role** key in the site.
 
+## Updates
+
+If you set up the database before 25 Nov 2026, run `supabase/update_2_profiles.sql` once in the SQL Editor. It adds division to union, contact numbers and profile photos.
+
 ## 5. Add people
 
 Sign in as admin, open **Users** and create logins for each Maa Bondhu, shopkeeper and gynecologist. Each person signs in with their phone number and the password you set. **Turn off** removes someone's access at once.

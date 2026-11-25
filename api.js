@@ -43,10 +43,12 @@
         const r = await tmp.auth.signUp({ email: toEmail(u.phone), password: u.password });
         if (r.error) throw new Error(r.error.message);
         if (!r.data.user || (r.data.user.identities && r.data.user.identities.length === 0)) throw new Error("A login with this phone number already exists.");
-        const row = { id: r.data.user.id, role: u.role, full_name: u.full_name, phone: u.phone, area: u.area || null, shop_name: u.shop_name || null, specialty: u.specialty || null, hospital: u.hospital || null, bmdc_no: u.bmdc_no || null };
+        const row = { id: r.data.user.id, role: u.role, full_name: u.full_name, phone: u.phone, area: u.area || null, shop_name: u.shop_name || null, specialty: u.specialty || null, hospital: u.hospital || null, bmdc_no: u.bmdc_no || null,
+          division: u.division || null, district: u.district || null, upazila: u.upazila || null, union_name: u.union_name || null, contact_phone: u.contact_phone || u.phone, alt_phone: u.alt_phone || null };
         return chk(await sb.from("profiles").insert(row).select().single());
       },
       async updateProfile(id, patch) { const d = chk(await sb.from("profiles").update(patch).eq("id", id).select().single()); if (me && id === me.id) me = d; return d; },
+      async changePassword(pw) { chk(await sb.auth.updateUser({ password: pw })); },
       async listMothers() { return chk(await sb.from("mothers").select("*").order("created_at", { ascending: false })); },
       async addMother(m) { return chk(await sb.from("mothers").insert({ ...m, maa_bondhu_id: m.maa_bondhu_id || me.id }).select().single()); },
       async updateMother(id, patch) { return chk(await sb.from("mothers").update(patch).eq("id", id).select().single()); },
@@ -73,18 +75,19 @@
 
   // ---------------- Test mode ----------------
   function testApi() {
-    const KEY = "maapushti-test-db-v1", SKEY = "maapushti-test-session";
+    const KEY = "maapushti-test-db-v2", SKEY = "maapushti-test-session";
     const uid = () => crypto.randomUUID();
     const daysFrom = d => { const x = new Date(); x.setDate(x.getDate() + d); return x.toISOString().slice(0, 10); };
     const ago = m => new Date(Date.now() - m * 60000).toISOString();
     function seed() {
       const P = (role, full_name, phone, extra) => ({ id: uid(), role, full_name, phone, password: "demo1234", area: null, shop_name: null, specialty: null, hospital: null, bmdc_no: null, available: true, active: true, created_at: nowIso(), ...extra });
+      const L = (u, z = "Tongibari") => ({ division: "Dhaka", district: "Munshiganj", upazila: z, union_name: u, area: u ? u + ", " + z : z });
       const admin = P("admin", "Riyad Hossain", "01700000000");
-      const mb1 = P("maa_bondhu", "Rahima Begum", "01711111111", { area: "Betka, Tongibari" });
-      const mb2 = P("maa_bondhu", "Salma Akter", "01722222222", { area: "Sonarang, Tongibari" });
-      const shop = P("shopkeeper", "Abdul Karim", "01733333333", { shop_name: "Karim Store, Betka bazar", area: "Betka" });
-      const d1 = P("doctor", "Dr. Nasrin Sultana", "01744444444", { specialty: "Gynecologist and obstetrician", hospital: "Munshiganj General Hospital", bmdc_no: "A-45120" });
-      const d2 = P("doctor", "Dr. Farhana Islam", "01755555555", { specialty: "Gynecologist", hospital: "Tongibari Upazila Health Complex", bmdc_no: "A-51877", available: false });
+      const mb1 = P("maa_bondhu", "Rahima Begum", "01711111111", L("Betka"));
+      const mb2 = P("maa_bondhu", "Salma Akter", "01722222222", L("Sonarong Tongibari"));
+      const shop = P("shopkeeper", "Abdul Karim", "01733333333", { shop_name: "Karim Store, Betka bazar", ...L("Betka") });
+      const d1 = P("doctor", "Dr. Nasrin Sultana", "01744444444", { specialty: "Gynecologist and obstetrician", hospital: "Munshiganj General Hospital", bmdc_no: "A-45120", ...L(null, "Munshiganj Sadar") });
+      const d2 = P("doctor", "Dr. Farhana Islam", "01755555555", { specialty: "Gynecologist", hospital: "Tongibari Upazila Health Complex", bmdc_no: "A-51877", available: false, ...L(null) });
       const M = (full_name, phone, village, wk, mb, extra) => ({ id: uid(), full_name, phone, age: 24, village, union_name: village, edd: daysFrom((40 - wk) * 7), husband_name: null, husband_phone: null, mil_name: null, mil_phone: null, gravida: 1, risk_notes: "", next_checkup: daysFrom(3), maa_bondhu_id: mb.id, shop_id: shop.id, consent: true, created_at: ago(60 * 24 * 20), ...extra });
       const m = [
         M("Shirin Akter", "01811111111", "Betka", 24, mb1, { husband_name: "Jamal Hossain", husband_phone: "01811111112", mil_name: "Amena Begum", mil_phone: "01811111113", next_checkup: daysFrom(1) }),
@@ -139,14 +142,17 @@
         const phone = String(u.phone).replace(/\D/g, "");
         if (db.profiles.some(p => p.phone === phone)) throw new Error("A login with this phone number already exists.");
         if (!u.password || u.password.length < 6) throw new Error("Password must be at least 6 characters.");
-        const p = { id: uid(), role: u.role, full_name: u.full_name, phone, password: u.password, area: u.area || null, shop_name: u.shop_name || null, specialty: u.specialty || null, hospital: u.hospital || null, bmdc_no: u.bmdc_no || null, available: true, active: true, created_at: nowIso() };
+        const p = { id: uid(), role: u.role, full_name: u.full_name, phone, password: u.password, area: u.area || null, shop_name: u.shop_name || null, specialty: u.specialty || null, hospital: u.hospital || null, bmdc_no: u.bmdc_no || null,
+          division: u.division || null, district: u.district || null, upazila: u.upazila || null, union_name: u.union_name || null, contact_phone: u.contact_phone || phone, alt_phone: u.alt_phone || null, photo: null, available: true, active: true, created_at: nowIso() };
         db.profiles.push(p); save(); return pub(p);
       },
       async updateProfile(id, patch) {
         fresh(); if (role() !== "admin" && id !== me.id) deny();
-        const p = db.profiles.find(x => x.id === id); if (role() !== "admin") { delete patch.role; delete patch.active; }
+        const p = db.profiles.find(x => x.id === id); patch = { ...patch }; delete patch.id; delete patch.phone; delete patch.password; delete patch.created_at;
+        if (role() !== "admin") ["role", "active", "area", "division", "district", "upazila", "union_name"].forEach(k => delete patch[k]);
         Object.assign(p, patch); save(); if (id === me.id) me = pub(p); return pub(p);
       },
+      async changePassword(pw) { fresh(); if (!pw || pw.length < 6) throw new Error("Password must be at least 6 characters."); db.profiles.find(x => x.id === me.id).password = pw; save(); },
       async listMothers() { fresh(); return sortNew(db.mothers.filter(motherVisible)); },
       async addMother(m) {
         fresh(); const owner = m.maa_bondhu_id || me.id;
