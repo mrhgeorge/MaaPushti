@@ -1,5 +1,5 @@
 -- MaaPushti database: run this whole file once in Supabase > SQL Editor.
--- Roles: admin, maa_bondhu, shopkeeper, doctor. Every table is protected by row-level security (RLS):
+-- Roles: admin, maa_bondhu, shopkeeper, doctor (family is added by update_3). Every table is protected by row-level security (RLS):
 -- a Maa Bondhu sees only her own mothers, a shopkeeper only the families assigned to their shop,
 -- a doctor only the mothers in consultations sent to them.
 

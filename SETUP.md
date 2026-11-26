@@ -10,6 +10,7 @@ Until you connect Supabase, the site runs in **test mode**: sample data stays in
 | Maa Bondhu | 01711111111, 01722222222 |
 | Shopkeeper | 01733333333 |
 | Gynecologist | 01744444444 |
+| Family (Shirin's husband) | 01766666666 |
 
 ## 1. Put the site on GitHub Pages
 
@@ -54,6 +55,15 @@ The anon key is meant to be public. Security comes from the database rules in `s
 ## Updates
 
 If you set up the database before 25 Nov 2026, run `supabase/update_2_profiles.sql` once in the SQL Editor. It adds division to union, contact numbers and profile photos.
+
+If you set up the database before 27 Nov 2026, run `supabase/update_3_family_orders.sql` once. It adds:
+
+- **Family logins.** A Maa Bondhu (or the admin) creates them from a mother's page, with her consent. The family sees her pregnancy week, checkups, doctor's advice and khata, can report a danger sign, and orders her basket.
+- **Choose-your-basket.** The core foods (eggs, lentils, greens, small fish, BDT 280) are always included. The family adds up to 3 extras: peanuts, chickpeas, dates, extra eggs, or the Pushti Plus fruit pack. Prices are set in the `basket_choices` table.
+- **Pre-orders with a deposit.** Pickup is on Friday; orders close on Wednesday night. A BDT 40 deposit is asked only when fresh fruit is chosen, until the family has picked up 3 baskets. The deposit is the first instalment, not an extra charge. A missed pickup alerts the Maa Bondhu, and the deposit stays as credit.
+- Mothers without a literate family member choose by keypad on the weekly call, or the Maa Bondhu orders for them.
+
+Then run `supabase/demo_data_3.sql` for sample family logins (husbands, 01998000001, 01998000006, 01998000011, 01998000016, 01998000021, password `demo1234`) and this week's orders.
 
 ## 5. Add people
 

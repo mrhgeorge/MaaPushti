@@ -45,6 +45,7 @@
         if (!r.data.user || (r.data.user.identities && r.data.user.identities.length === 0)) throw new Error("A login with this phone number already exists.");
         const row = { id: r.data.user.id, role: u.role, full_name: u.full_name, phone: u.phone, area: u.area || null, shop_name: u.shop_name || null, specialty: u.specialty || null, hospital: u.hospital || null, bmdc_no: u.bmdc_no || null,
           division: u.division || null, district: u.district || null, upazila: u.upazila || null, union_name: u.union_name || null, contact_phone: u.contact_phone || u.phone, alt_phone: u.alt_phone || null };
+        if (u.role === "family") { row.mother_id = u.mother_id; row.relation = u.relation || null; }
         return chk(await sb.from("profiles").insert(row).select().single());
       },
       async updateProfile(id, patch) { const d = chk(await sb.from("profiles").update(patch).eq("id", id).select().single()); if (me && id === me.id) me = d; return d; },
@@ -63,10 +64,15 @@
       async listConsults() { return chk(await sb.from("consultations").select("*").order("created_at", { ascending: false })); },
       async addConsult(c) { return chk(await sb.from("consultations").insert({ ...c, maa_bondhu_id: me.id, room: room() }).select().single()); },
       async updateConsult(id, patch) { return chk(await sb.from("consultations").update({ ...patch, updated_at: nowIso() }).eq("id", id).select().single()); },
+      async listChoices() { return chk(await sb.from("basket_choices").select("*").eq("active", true).order("sort")); },
+      async listOrders() { return chk(await sb.from("orders").select("*").order("pickup_date", { ascending: false }).order("created_at", { ascending: false }).limit(1000)); },
+      async addOrder(o) { return chk(await sb.from("orders").insert({ mother_id: o.mother_id, items: o.items || [], source: o.source || "family" }).select().single()); },
+      async updateOrder(id, patch) { return chk(await sb.from("orders").update(patch).eq("id", id).select().single()); },
       subscribe(cb) {
         const ch = sb.channel("mp-live")
           .on("postgres_changes", { event: "*", schema: "public", table: "consultations" }, cb)
-          .on("postgres_changes", { event: "*", schema: "public", table: "alerts" }, cb).subscribe();
+          .on("postgres_changes", { event: "*", schema: "public", table: "alerts" }, cb)
+          .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, cb).subscribe();
         const t = setInterval(cb, 20000);
         return () => { clearInterval(t); sb.removeChannel(ch); };
       }
@@ -75,10 +81,21 @@
 
   // ---------------- Test mode ----------------
   function testApi() {
-    const KEY = "maapushti-test-db-v2", SKEY = "maapushti-test-session";
+    const KEY = "maapushti-test-db-v3", SKEY = "maapushti-test-session";
     const uid = () => crypto.randomUUID();
     const daysFrom = d => { const x = new Date(); x.setDate(x.getDate() + d); return x.toISOString().slice(0, 10); };
     const ago = m => new Date(Date.now() - m * 60000).toISOString();
+    const CHOICES = [
+      { code: "peanuts", name: "Peanuts, 200 g", price: 30, perishable: false, why: "Protein, healthy fat and folate. Skip if she is allergic to peanuts.", sort: 1 },
+      { code: "chickpeas", name: "Chickpeas (chola), 250 g", price: 30, perishable: false, why: "Protein and iron.", sort: 2 },
+      { code: "dates", name: "Dates (khejur), 100 g", price: 35, perishable: false, why: "Iron and quick energy.", sort: 3 },
+      { code: "eggs4", name: "Extra eggs x4", price: 60, perishable: false, why: "More protein for the baby's growth.", sort: 4 },
+      { code: "fruit", name: "Pushti Plus fruit pack: 2 carrots, 2 lemons, 2 guavas, 2 bananas, 2 sofeda", price: 80, perishable: true, why: "Vitamin C from lemon and guava helps her body absorb iron from dal and greens.", sort: 5 }];
+    const ymd = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    // Pickup is on Friday; orders for a Friday close on Wednesday night.
+    const pickup = () => { const d = new Date(), w = d.getDay(); d.setDate(d.getDate() + (5 - w + 7) % 7 + (w === 4 || w === 5 ? 7 : 0)); return ymd(d); };
+    const priced = codes => { const it = CHOICES.filter(c => (codes || []).includes(c.code)).map(({ code, name, price, perishable }) => ({ code, name, price, perishable }));
+      return { items: it, total: 280 + it.reduce((t, c) => t + c.price, 0), per: it.some(c => c.perishable) }; };
     function seed() {
       const P = (role, full_name, phone, extra) => ({ id: uid(), role, full_name, phone, password: "demo1234", area: null, shop_name: null, specialty: null, hospital: null, bmdc_no: null, available: true, active: true, created_at: nowIso(), ...extra });
       const L = (u, z = "Tongibari") => ({ division: "Dhaka", district: "Munshiganj", upazila: z, union_name: u, area: u ? u + ", " + z : z });
@@ -96,8 +113,16 @@
         M("Jesmin Akter", "01844444444", "Betka", 33, mb1, { next_checkup: daysFrom(5) }),
         M("Moriom Akter", "01855555555", "Sonarang", 36, mb2, { shop_id: null }),
         M("Taslima Begum", "01866666666", "Sonarang", 18, mb2, { shop_id: null })];
+      const fam = P("family", "Jamal Hossain", "01766666666", { mother_id: m[0].id, relation: "husband" });
+      const pk = pickup(), wk = n => { const d = new Date(pk + "T00:00:00"); d.setDate(d.getDate() - 7 * n); return ymd(d); };
+      const O = (mo, codes, pd, st, extra) => { const p = priced(codes); return { id: uid(), mother_id: mo.id, shop_id: shop.id, pickup_date: pd, items: p.items, total: p.total, deposit: 0, deposit_method: null, deposit_ref: null, status: st, source: "family", created_by: null, created_at: ago(60 * 24 * 2), updated_at: ago(60 * 24), ...extra }; };
       return {
-        profiles: [admin, mb1, mb2, shop, d1, d2], mothers: m,
+        orders: [O(m[0], ["peanuts"], wk(4), "picked_up"), O(m[0], [], wk(3), "picked_up"), O(m[0], ["dates"], wk(2), "picked_up"),
+          O(m[0], ["peanuts", "fruit"], pk, "confirmed"),
+          O(m[1], ["fruit"], pk, "awaiting_deposit", { deposit: 40, deposit_method: "bKash", deposit_ref: "BK8KD2XQ7", source: "maa_bondhu" }),
+          O(m[2], ["fruit", "eggs4"], pk, "awaiting_deposit", { deposit: 40, source: "call" }),
+          O(m[3], ["chickpeas"], pk, "confirmed", { source: "call" })],
+        profiles: [admin, mb1, mb2, shop, d1, d2, fam], mothers: m,
         alerts: [{ id: uid(), mother_id: m[1].id, sign: "Swelling of hands, feet or face", note: "", source: "call", status: "open", created_at: ago(95), resolved_at: null },
                  { id: uid(), mother_id: m[3].id, sign: "Baby moving less", note: "", source: "call", status: "open", created_at: ago(60 * 20), resolved_at: null }],
         activity: [{ id: uid(), mother_id: m[0].id, user_id: mb1.id, kind: "visit", note: "Home visit. Eating eggs daily, taking iron tablets.", created_at: ago(60 * 24 * 3) }],
@@ -116,8 +141,11 @@
     const role = () => me && me.role;
     const fresh = () => { load(); if (me) { const p = db.profiles.find(x => x.id === me.id); me = p && p.active ? pub(p) : null; } };
     const deny = () => { throw new Error("You don't have permission to do that."); };
-    const motherVisible = m => role() === "admin" || (role() === "maa_bondhu" && m.maa_bondhu_id === me.id) || (role() === "doctor" && db.consultations.some(c => c.mother_id === m.id && c.doctor_id === me.id));
-    const canSee = id => { const m = db.mothers.find(x => x.id === id); return !!m && motherVisible(m); };
+    const motherVisible = m => (role() === "family" && m.id === me.mother_id) || role() === "admin" || (role() === "maa_bondhu" && m.maa_bondhu_id === me.id) || (role() === "doctor" && db.consultations.some(c => c.mother_id === m.id && c.doctor_id === me.id));
+    const canSee = id => { const m = db.mothers.find(x => x.id === id); return !!m && role() !== "family" && motherVisible(m); };
+    const myMother = id => role() === "family" && id === me.mother_id;
+    const mbMother = id => role() === "maa_bondhu" && db.mothers.some(m => m.id === id && m.maa_bondhu_id === me.id);
+    const famContacts = () => { const m = db.mothers.find(x => x.id === me.mother_id) || {}; return [m.maa_bondhu_id, m.shop_id, ...db.consultations.filter(c => c.mother_id === m.id).map(c => c.doctor_id)]; };
     const sortNew = a => a.slice().sort((x, y) => y.created_at.localeCompare(x.created_at));
     return {
       mode: "test",
@@ -133,23 +161,25 @@
       async signOut() { me = null; try { sessionStorage.removeItem(SKEY); } catch (e) {} },
       async listProfiles(r) {
         fresh(); let list = db.profiles.filter(p => p.id === me.id || role() === "admin" || (role() === "maa_bondhu" && ["doctor", "shopkeeper"].includes(p.role) && p.active)
-          || (role() === "doctor" && db.consultations.some(c => c.doctor_id === me.id && c.maa_bondhu_id === p.id)));
+          || (role() === "doctor" && db.consultations.some(c => c.doctor_id === me.id && c.maa_bondhu_id === p.id))
+          || (role() === "maa_bondhu" && p.role === "family" && mbMother(p.mother_id)) || (role() === "family" && famContacts().includes(p.id)));
         if (r) list = list.filter(p => p.role === r);
         return list.map(pub).sort((a, b) => a.full_name.localeCompare(b.full_name));
       },
       async createUser(u) {
-        fresh(); if (role() !== "admin") deny();
+        fresh(); if (!(role() === "admin" || (u.role === "family" && mbMother(u.mother_id)))) deny();
         const phone = String(u.phone).replace(/\D/g, "");
         if (db.profiles.some(p => p.phone === phone)) throw new Error("A login with this phone number already exists.");
         if (!u.password || u.password.length < 6) throw new Error("Password must be at least 6 characters.");
         const p = { id: uid(), role: u.role, full_name: u.full_name, phone, password: u.password, area: u.area || null, shop_name: u.shop_name || null, specialty: u.specialty || null, hospital: u.hospital || null, bmdc_no: u.bmdc_no || null,
-          division: u.division || null, district: u.district || null, upazila: u.upazila || null, union_name: u.union_name || null, contact_phone: u.contact_phone || phone, alt_phone: u.alt_phone || null, photo: null, available: true, active: true, created_at: nowIso() };
+          division: u.division || null, district: u.district || null, upazila: u.upazila || null, union_name: u.union_name || null, contact_phone: u.contact_phone || phone, alt_phone: u.alt_phone || null, photo: null, available: true, active: true, created_at: nowIso(),
+          mother_id: u.role === "family" ? u.mother_id : null, relation: u.role === "family" ? (u.relation || null) : null };
         db.profiles.push(p); save(); return pub(p);
       },
       async updateProfile(id, patch) {
         fresh(); if (role() !== "admin" && id !== me.id) deny();
         const p = db.profiles.find(x => x.id === id); patch = { ...patch }; delete patch.id; delete patch.phone; delete patch.password; delete patch.created_at;
-        if (role() !== "admin") ["role", "active", "area", "division", "district", "upazila", "union_name"].forEach(k => delete patch[k]);
+        if (role() !== "admin") ["role", "active", "area", "division", "district", "upazila", "union_name", "mother_id"].forEach(k => delete patch[k]);
         Object.assign(p, patch); save(); if (id === me.id) me = pub(p); return pub(p);
       },
       async changePassword(pw) { fresh(); if (!pw || pw.length < 6) throw new Error("Password must be at least 6 characters."); db.profiles.find(x => x.id === me.id).password = pw; save(); },
@@ -164,13 +194,13 @@
         if (!m || !(role() === "admin" || (role() === "maa_bondhu" && m.maa_bondhu_id === me.id))) deny();
         Object.assign(m, patch); save(); return m;
       },
-      async listAlerts() { fresh(); return sortNew(db.alerts.filter(a => canSee(a.mother_id))); },
-      async addAlert(a) { fresh(); if (!canSee(a.mother_id)) deny(); const row = { id: uid(), status: "open", source: "call", note: "", created_at: nowIso(), resolved_at: null, ...a }; db.alerts.push(row); save(); return row; },
+      async listAlerts() { fresh(); return sortNew(db.alerts.filter(a => canSee(a.mother_id) || myMother(a.mother_id))); },
+      async addAlert(a) { fresh(); if (!canSee(a.mother_id) && !(myMother(a.mother_id) && a.source === "family")) deny(); const row = { id: uid(), status: "open", source: "call", note: "", created_at: nowIso(), resolved_at: null, ...a }; db.alerts.push(row); save(); return row; },
       async resolveAlert(id) { fresh(); const a = db.alerts.find(x => x.id === id); if (!a || !canSee(a.mother_id)) deny(); a.status = "visited"; a.resolved_at = nowIso(); save(); return a; },
       async listActivity() { fresh(); return sortNew(db.activity.filter(a => canSee(a.mother_id))); },
       async addActivity(a) { fresh(); if (!canSee(a.mother_id)) deny(); const row = { id: uid(), user_id: me.id, created_at: nowIso(), ...a }; db.activity.push(row); save(); return row; },
       async listSales() {
-        fresh(); return sortNew(db.sales.filter(s => role() === "admin" || s.shop_id === me.id || (role() === "maa_bondhu" && db.mothers.some(m => m.id === s.mother_id && m.maa_bondhu_id === me.id))));
+        fresh(); return sortNew(db.sales.filter(s => role() === "admin" || s.shop_id === me.id || myMother(s.mother_id) || (role() === "maa_bondhu" && db.mothers.some(m => m.id === s.mother_id && m.maa_bondhu_id === me.id))));
       },
       async addSale(s) {
         fresh(); const m = db.mothers.find(x => x.id === s.mother_id);
@@ -178,7 +208,52 @@
         const row = { id: uid(), shop_id: me.id, created_at: nowIso(), amount: 0, method: null, ...s }; db.sales.push(row); save(); return row;
       },
       async shopCustomers() { fresh(); if (role() !== "shopkeeper") return []; return db.mothers.filter(m => m.shop_id === me.id).map(m => ({ id: m.id, full_name: m.full_name, village: m.village })).sort((a, b) => a.full_name.localeCompare(b.full_name)); },
-      async listConsults() { fresh(); return sortNew(db.consultations.filter(c => role() === "admin" || c.maa_bondhu_id === me.id || c.doctor_id === me.id)); },
+      async listConsults() { fresh(); return sortNew(db.consultations.filter(c => role() === "admin" || c.maa_bondhu_id === me.id || c.doctor_id === me.id || myMother(c.mother_id))); },
+      async listChoices() { return CHOICES.slice(); },
+      async listOrders() {
+        fresh(); return db.orders.filter(o => role() === "admin" || myMother(o.mother_id) || mbMother(o.mother_id) || (role() === "shopkeeper" && o.shop_id === me.id))
+          .sort((a, b) => b.pickup_date.localeCompare(a.pickup_date) || b.created_at.localeCompare(a.created_at));
+      },
+      async addOrder(o) {
+        fresh(); const m = db.mothers.find(x => x.id === o.mother_id);
+        if (!m || !(role() === "admin" || myMother(m.id) || mbMother(m.id))) deny();
+        if (!m.shop_id) throw new Error("No Pushti Basket shop is assigned to this mother yet. Ask her Maa Bondhu.");
+        if ((o.items || []).length > 3) throw new Error("Choose up to 3 extra items.");
+        const pd = pickup();
+        if (db.orders.some(x => x.mother_id === m.id && x.pickup_date === pd && x.status !== "cancelled")) throw new Error("A basket is already ordered for this Friday. Cancel it first to change it.");
+        const p = priced(o.items), done = db.orders.filter(x => x.mother_id === m.id && x.status === "picked_up").length, dep = p.per && done < 3 ? 40 : 0;
+        const row = { id: uid(), mother_id: m.id, shop_id: m.shop_id, pickup_date: pd, items: p.items, total: p.total, deposit: dep, deposit_method: null, deposit_ref: null,
+          status: dep ? "awaiting_deposit" : "confirmed", source: role() === "family" ? "family" : o.source === "call" ? "call" : "maa_bondhu", created_by: me.id, created_at: nowIso(), updated_at: nowIso() };
+        db.orders.push(row); save(); return row;
+      },
+      async updateOrder(id, patch) {
+        fresh(); const o = db.orders.find(x => x.id === id), r = role();
+        if (!o || !(r === "admin" || myMother(o.mother_id) || mbMother(o.mother_id) || (r === "shopkeeper" && o.shop_id === me.id))) deny();
+        const st = patch.status;
+        if (st && st !== o.status) {
+          if (["picked_up", "missed", "cancelled"].includes(o.status)) throw new Error("This order is already closed.");
+          if (st === "cancelled") {
+            if (r === "shopkeeper") throw new Error("Only the family or Maa Bondhu can cancel an order.");
+            if (o.status === "confirmed" && o.deposit > 0) throw new Error("The deposit is already paid. Ask the Maa Bondhu or the shop.");
+            const cut = new Date(o.pickup_date + "T00:00:00"); cut.setDate(cut.getDate() - 2); cut.setHours(23, 59, 59);
+            if (r === "family" && Date.now() > cut) throw new Error("Orders for this Friday closed on Wednesday night.");
+          } else if (st === "confirmed") { if (!(r === "shopkeeper" || r === "admin") || o.status !== "awaiting_deposit") throw new Error("Only the shop confirms that the deposit was received."); }
+          else if (st === "picked_up" || st === "missed") {
+            if (!(r === "shopkeeper" || r === "admin")) throw new Error("Only the shop marks pickups.");
+            if (st === "picked_up" && o.status !== "confirmed") throw new Error("Confirm the deposit before handing over the basket.");
+          } else throw new Error("Invalid order status.");
+        }
+        const prev = o.status;
+        if (o.status === "awaiting_deposit" && r !== "shopkeeper") { if ("deposit_method" in patch) o.deposit_method = patch.deposit_method; if ("deposit_ref" in patch) o.deposit_ref = patch.deposit_ref; }
+        if (r === "shopkeeper" && !o.deposit_method && patch.deposit_method) o.deposit_method = patch.deposit_method;
+        if (st) o.status = st; o.updated_at = nowIso();
+        if (st && st !== prev) {
+          if (st === "confirmed" && o.deposit) db.sales.push({ id: uid(), mother_id: o.mother_id, shop_id: o.shop_id, kind: "payment", amount: o.deposit, method: o.deposit_method || "Cash", created_at: nowIso() });
+          if (st === "picked_up") db.sales.push({ id: uid(), mother_id: o.mother_id, shop_id: o.shop_id, kind: "basket", amount: o.total, method: null, created_at: nowIso() });
+          if (st === "missed") db.alerts.push({ id: uid(), mother_id: o.mother_id, sign: "Missed basket pickup", note: "Please check on her. Any deposit stays as credit for her next basket.", source: "shop", status: "open", created_at: nowIso(), resolved_at: null });
+        }
+        save(); return o;
+      },
       async addConsult(c) {
         fresh(); const m = db.mothers.find(x => x.id === c.mother_id); const d = db.profiles.find(x => x.id === c.doctor_id && x.role === "doctor");
         if (role() !== "maa_bondhu" || !m || m.maa_bondhu_id !== me.id || !d) deny();

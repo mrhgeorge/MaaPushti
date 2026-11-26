@@ -1,18 +1,22 @@
-// MaaPushti web app: one page, four roles (admin, Maa Bondhu, shopkeeper, gynecologist).
+// MaaPushti web app: one page, five roles (admin, Maa Bondhu, shopkeeper, gynecologist, family).
 (function () {
   const api = window.MP_API, CFG = window.MAAPUSHTI_CONFIG || {};
   const $ = s => document.querySelector(s);
   const app = $("#app");
   const BASKET = 280;
   const SIGNS = ["Bleeding", "Swelling of hands, feet or face", "Severe headache or fits", "Fever", "Baby moving less"];
-  const ROLE = { admin: "Admin", maa_bondhu: "Maa Bondhu", shopkeeper: "Shopkeeper", doctor: "Gynecologist" };
+  const ROLE = { admin: "Admin", maa_bondhu: "Maa Bondhu", shopkeeper: "Shopkeeper", doctor: "Gynecologist", family: "Family" };
+  const CORE = [["Eggs", "7 (one a day)", 105, "Protein, choline for the baby's brain"], ["Red lentils", "500 g", 65, "Protein, iron, folate"], ["Leafy greens", "2 bunches", 40, "Iron, folate, vitamin A"], ["Small fish (eaten whole)", "250 g", 70, "Calcium, iron, vitamin A"]];
+  const OST = { awaiting_deposit: ["Waiting for deposit", "t-co"], confirmed: ["Confirmed", "t-ok"], picked_up: ["Picked up", "t-ok"], missed: ["Missed", "t-red"], cancelled: ["Cancelled", "t-mut"] };
+  const RELS = ["Husband", "Mother-in-law", "Son", "Daughter", "Sister", "Brother", "Other relative"];
   const TABS = {
     admin: [["overview", "Overview"], ["users", "Users"], ["mothers", "Mothers"], ["consults", "Consultations"], ["ivr", "Phone demo"], ["me", "My profile"]],
     maa_bondhu: [["home", "My mothers"], ["register", "Register mother"], ["doctors", "Doctors"], ["consults", "Consultations"], ["ivr", "Phone demo"], ["me", "My profile"]],
-    shopkeeper: [["record", "Record sale"], ["ledger", "Khata"], ["me", "My profile"]],
+    shopkeeper: [["orders", "Pre-orders"], ["record", "Record sale"], ["ledger", "Khata"], ["me", "My profile"]],
+    family: [["family", "Our mother"], ["basket", "Basket order"], ["me", "My profile"]],
     doctor: [["requests", "Requests"], ["history", "History"], ["me", "My profile"]]
   };
-  let D = { profiles: [], mothers: [], alerts: [], activity: [], sales: [], consults: [], customers: [] };
+  let D = { profiles: [], mothers: [], alerts: [], activity: [], sales: [], consults: [], customers: [], orders: [], choices: [] };
   let filt = "all", q = "", unsub = null, openMother = null, seenReq = new Set();
 
   // ---------- helpers ----------
@@ -28,7 +32,19 @@
   const byId = (list, id) => list.find(x => x.id === id);
   const pName = id => (byId(D.profiles, id) || {}).full_name || "-";
   const mName = id => (byId(D.mothers, id) || byId(D.customers, id) || {}).full_name || "Mother";
-  const openAlerts = id => D.alerts.filter(a => a.mother_id === id && a.status === "open");
+  const isDanger = a => a.source !== "shop";
+  const openAlerts = id => D.alerts.filter(a => a.mother_id === id && a.status === "open" && isDanger(a));
+  const basketPrice = s => s.amount || BASKET;
+  const ymd = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  // Pickup is on Friday; orders for a Friday close on Wednesday night.
+  const nextPickup = () => { const d = new Date(), w = d.getDay(); d.setDate(d.getDate() + (5 - w + 7) % 7 + (w === 4 || w === 5 ? 7 : 0)); return ymd(d); };
+  const cutoffOf = pd => { const d = new Date(pd + "T00:00:00"); d.setDate(d.getDate() - 2); return d; };
+  const fmtDay = s => new Date(s + "T00:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" });
+  const ordersOf = id => D.orders.filter(o => o.mother_id === id);
+  const currentOrder = id => D.orders.find(o => o.mother_id === id && o.pickup_date >= nextPickup() && o.status !== "cancelled");
+  const pickups = id => D.orders.filter(o => o.mother_id === id && o.status === "picked_up").length;
+  const ostTag = o => tag(OST[o.status][0], OST[o.status][1]);
+  const itemsText = o => (o.items || []).length ? o.items.map(i => i.name.split(":")[0]).join(", ") : "Core only";
   const toast = t => { const e = $("#toast"); e.textContent = t; e.classList.add("on"); clearTimeout(toast.h); toast.h = setTimeout(() => e.classList.remove("on"), 3200); };
   const me = () => api.me();
   const guard = async (fn, msg) => { try { const r = await fn(); if (msg) toast(msg); return r; } catch (e) { toast(e.message || "Something went wrong"); console.error(e); } };
@@ -89,6 +105,7 @@
     if (r !== "shopkeeper") { set("mothers", api.listMothers()); set("alerts", api.listAlerts()); set("activity", api.listActivity()); set("consults", api.listConsults()); }
     if (r !== "doctor") set("sales", api.listSales());
     if (r === "shopkeeper") set("customers", api.shopCustomers());
+    if (r !== "doctor") { set("orders", api.listOrders()); set("choices", api.listChoices()); }
     await Promise.all(P);
   }
 
@@ -101,7 +118,7 @@
       <p class="err" id="le">${esc(err || "")}</p>
       <button class="btn pri" style="width:100%">Sign in</button>
       ${api.mode === "test" ? `<div class="note" style="margin-top:16px"><b>Test mode logins</b> (password <b>demo1234</b>):<br>
-        Admin 01700000000 · Maa Bondhu 01711111111 or 01722222222<br>Shopkeeper 01733333333 · Gynecologist 01744444444</div>` : ""}
+        Admin 01700000000 · Maa Bondhu 01711111111 or 01722222222<br>Shopkeeper 01733333333 · Gynecologist 01744444444<br>Family (Shirin's husband) 01766666666</div>` : ""}
     </form></div>`;
     $("#lf").onsubmit = async e => {
       e.preventDefault(); const v = form(e.target); $("#le").textContent = "Signing in...";
@@ -113,7 +130,8 @@
   function tab() { const t = location.hash.slice(1), list = TABS[me().role]; return list.some(x => x[0] === t) ? t : list[0][0]; }
   function shell(body) {
     const u = me(), t = tab();
-    const badge = k => { const n = k === "home" || k === "overview" ? D.alerts.filter(a => a.status === "open").length : k === "requests" ? D.consults.filter(c => c.status === "requested" && c.doctor_id === u.id).length : 0; return n ? ` <span class="badge">${n}</span>` : ""; };
+    const badge = k => { const n = k === "home" || k === "overview" ? D.alerts.filter(a => a.status === "open").length : k === "requests" ? D.consults.filter(c => c.status === "requested" && c.doctor_id === u.id).length
+      : k === "orders" ? D.orders.filter(o => o.status === "awaiting_deposit" && o.pickup_date >= nextPickup()).length : k === "basket" ? D.orders.filter(o => o.status === "awaiting_deposit" && o.pickup_date >= nextPickup()).length : 0; return n ? ` <span class="badge">${n}</span>` : ""; };
     app.innerHTML = `${api.mode === "test" ? `<div class="testbar">Test mode: sample data stored only in this browser. <a href="#" id="rst">Reset sample data</a></div>` : ""}
       <header class="top"><div class="row"><div class="brand">MaaPushti</div>
       <div class="who"><a href="#me" style="display:flex;align-items:center;gap:8px;color:inherit;text-decoration:none">${av(u, 32)}<b>${esc(u.full_name)}</b></a><span class="pill">${ROLE[u.role]}</span><button class="btn sm" id="lo" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.4)">Sign out</button></div></div>
@@ -129,7 +147,8 @@
     const V = {
       admin: { overview: adminOverview, users: adminUsers, mothers: adminMothers, consults: consultsView, ivr: ivrView, me: profileView },
       maa_bondhu: { home: mbHome, register: registerView, doctors: doctorsView, consults: consultsView, ivr: ivrView, me: profileView },
-      shopkeeper: { record: shopRecord, ledger: shopLedger, me: profileView },
+      shopkeeper: { orders: shopOrders, record: shopRecord, ledger: shopLedger, me: profileView },
+      family: { family: familyHome, basket: familyBasket, me: profileView },
       doctor: { requests: docRequests, history: docHistory, me: profileView }
     };
     shell(V[r][t]());
@@ -154,8 +173,8 @@
   }
   function alertList(list) {
     if (!list.length) return `<p class="empty">No open danger-sign alerts.</p>`;
-    return list.map(a => { const m = byId(D.mothers, a.mother_id) || {}; return `<div class="alert"><div><b>${esc(a.sign)}</b> · ${esc(m.full_name)}, ${esc(m.village)}${m.edd ? ", week " + week(m.edd) : ""}
-      <div class="note">${ago(a.created_at)} · reported by ${esc(a.source)}${a.note ? " · " + esc(a.note) : ""}</div></div>
+    return list.map(a => { const m = byId(D.mothers, a.mother_id) || {}; return `<div class="alert${isDanger(a) ? "" : " chk"}"><div><b>${isDanger(a) ? "" : "Check in: "}${esc(a.sign)}</b> · ${esc(m.full_name)}, ${esc(m.village)}${m.edd ? ", week " + week(m.edd) : ""}
+      <div class="note">${ago(a.created_at)} · reported by ${esc({ call: "her weekly call", visit: "home visit", family: "her family", shop: "the shop" }[a.source] || a.source)}${a.note ? " · " + esc(a.note) : ""}</div></div>
       <div class="acts">${m.phone ? `<a class="btn call sm" href="${telHref(m.phone)}" data-call="${m.id}">Call mother</a>` : ""}<button class="btn sm" data-open="${m.id}">Open</button><button class="btn co sm" data-resolve="${a.id}">Mark visited</button></div></div>`; }).join("");
   }
   function bindCommon() {
@@ -188,7 +207,8 @@
     const events = [
       ...D.alerts.filter(a => a.mother_id === id).map(a => ({ t: a.created_at, c: a.status === "open" ? "red" : "", h: `<b>Danger sign: ${esc(a.sign)}</b> ${a.status === "open" ? tag("Open", "t-red") : tag("Visited", "t-ok")}${a.note ? "<br>" + esc(a.note) : ""}` })),
       ...D.activity.filter(a => a.mother_id === id).map(a => ({ t: a.created_at, c: "", h: `<b>${{ call: "Phone call", visit: "Home visit", note: "Note", checkup: "Checkup" }[a.kind]}</b> by ${esc(pName(a.user_id))}${a.note ? "<br>" + esc(a.note) : ""}` })),
-      ...D.sales.filter(s => s.mother_id === id).map(s => ({ t: s.created_at, c: "co", h: s.kind === "basket" ? "<b>Pushti Basket bought</b> (BDT 280)" : `<b>Paid BDT ${s.amount}</b> by ${esc(s.method || "")}` })),
+      ...D.sales.filter(s => s.mother_id === id).map(s => ({ t: s.created_at, c: "co", h: s.kind === "basket" ? `<b>Pushti Basket bought</b> (BDT ${basketPrice(s)})` : `<b>Paid BDT ${s.amount}</b> by ${esc(s.method || "")}` })),
+      ...ordersOf(id).map(o => ({ t: o.created_at, c: "co", h: `<b>Basket ordered for ${fmtD(o.pickup_date)}</b> ${ostTag(o)}<br>${esc(itemsText(o))} · BDT ${o.total} · by ${esc({ family: "family", call: "phone call", maa_bondhu: "Maa Bondhu" }[o.source])}` })),
       ...D.consults.filter(c => c.mother_id === id).map(c => ({ t: c.created_at, c: "co", h: `<b>${c.mode === "video" ? "Video" : "Audio"} consultation</b> with ${esc(pName(c.doctor_id))} ${tag(c.status, c.status === "done" ? "t-ok" : "t-co")}${c.reason ? "<br>Reason: " + esc(c.reason) : ""}${c.doctor_notes ? "<br><b>Doctor's advice:</b> " + esc(c.doctor_notes) : ""}` }))
     ].sort((a, b) => b.t.localeCompare(a.t));
     const fam = [["husband", m.husband_name, m.husband_phone], ["mother-in-law", m.mil_name, m.mil_phone]].filter(f => f[2]);
@@ -196,6 +216,7 @@
       <div class="acts">${r === "maa_bondhu" ? `<a class="btn call" href="${telHref(m.phone)}" data-call="${m.id}">Call mother</a>
         ${fam.map(f => `<a class="btn" href="${telHref(f[2])}" data-call="${m.id}" data-who="${f[0]}">Call ${f[0]}</a>`).join("")}
         <button class="btn co" data-consult="${m.id}">Consult a doctor</button>` : ""}
+        ${canEdit ? `<button class="btn" data-order="${m.id}">Basket order${currentOrder(m.id) ? ": " + OST[currentOrder(m.id).status][0].toLowerCase() : ""}</button>` : ""}
         ${r === "doctor" ? `<a class="btn call" href="${telHref(m.phone)}">Call mother</a>` : ""}</div>
       <div class="kv">
         <div><span>Phone</span>${esc(m.phone)}</div><div><span>Age</span>${esc(m.age || "-")}</div><div><span>Pregnancy number</span>${esc(m.gravida || "-")}</div>
@@ -209,9 +230,12 @@
         <div class="f"><label for="nc">Next checkup</label><input id="nc" name="next_checkup" type="date" value="${esc(m.next_checkup || "")}"></div>
         <div class="f full"><label for="rn">Notes</label><textarea id="rn" name="note" placeholder="What did you see or advise?"></textarea></div>
         <div><button class="btn pri">Save</button></div></form>` : ""}
+      ${canEdit ? familySection(m) : ""}
       <h2>History</h2>${events.length ? `<ul class="tl">${events.map(e => `<li class="${e.c}">${e.h}<br><small>${fmtD(e.t)} · ${ago(e.t)}</small></li>`).join("")}</ul>` : `<p class="empty">Nothing recorded yet.</p>`}`);
     el.querySelectorAll("[data-call]").forEach(b => b.addEventListener("click", () => logCall(b.dataset.call, b.dataset.who || "mother")));
     el.querySelectorAll("[data-consult]").forEach(b => b.onclick = () => consultModal(b.dataset.consult));
+    el.querySelectorAll("[data-order]").forEach(b => b.onclick = () => orderModal(b.dataset.order));
+    if (canEdit) bindFamilySection(el, m);
     const f = el.querySelector("#mrec");
     if (f) {
       f.kind.onchange = () => { el.querySelector("#sgw").hidden = f.kind.value !== "alert"; };
@@ -268,14 +292,16 @@
   // ---------- Maa Bondhu ----------
   function mbHome() {
     const mine = D.mothers.filter(m => m.maa_bondhu_id === me().id);
-    const oa = D.alerts.filter(a => a.status === "open"), over = mine.filter(m => dayDiff(m.next_checkup) < 0).length;
+    const oa = D.alerts.filter(a => a.status === "open"), od = oa.filter(isDanger), over = mine.filter(m => dayDiff(m.next_checkup) < 0).length;
+    const ords = D.orders.filter(o => o.pickup_date === nextPickup() && o.status !== "cancelled" && mine.some(m => m.id === o.mother_id));
     let list = mine.filter(m => filt === "all" || (filt === "alert" && openAlerts(m.id).length) || (filt === "over" && dayDiff(m.next_checkup) < 0) || (filt === "t3" && week(m.edd) > 27));
     if (q) list = list.filter(m => (m.full_name + " " + m.village + " " + m.phone).toLowerCase().includes(q));
     list.sort((a, b) => openAlerts(b.id).length - openAlerts(a.id).length || (dayDiff(a.next_checkup) ?? 99) - (dayDiff(b.next_checkup) ?? 99));
     return `<h1>Good day, ${esc(me().full_name.split(" ")[0])}</h1><p class="sub">${esc(me().area || "")} · You can only see the mothers you look after.</p>
-      <div class="kpis"><div class="kpi"><b>${mine.length}</b><span>My mothers</span></div><div class="kpi ${oa.length ? "hot" : ""}"><b>${oa.length}</b><span>Open danger signs</span></div>
-      <div class="kpi"><b>${over}</b><span>Overdue checkups</span></div><div class="kpi"><b>${D.consults.filter(c => c.status !== "done" && c.status !== "declined").length}</b><span>Open consultations</span></div></div>
-      <h2>Danger-sign alerts</h2>${alertList(oa)}
+      <div class="kpis"><div class="kpi"><b>${mine.length}</b><span>My mothers</span></div><div class="kpi ${od.length ? "hot" : ""}"><b>${od.length}</b><span>Open danger signs</span></div>
+      <div class="kpi"><b>${over}</b><span>Overdue checkups</span></div><div class="kpi"><b>${D.consults.filter(c => c.status !== "done" && c.status !== "declined").length}</b><span>Open consultations</span></div>
+      <div class="kpi"><b>${ords.length}</b><span>Baskets ordered for ${esc(fmtDay(nextPickup()).split(",")[0])}</span></div></div>
+      <h2>Alerts</h2>${alertList(oa)}
       <h2>My mothers</h2><div class="tools">${[["all", "All"], ["alert", "Danger sign"], ["over", "Checkup overdue"], ["t3", "3rd trimester"]].map(([k, l]) => `<button class="chip ${filt === k ? "on" : ""}" data-f="${k}">${l}</button>`).join("")}
       <input id="q" type="search" placeholder="Search name, village or phone" value="${esc(q)}" aria-label="Search"><a class="btn pri" href="#register">+ Register mother</a></div>
       ${motherTable(list)}`;
@@ -342,16 +368,17 @@
     const m = byId(D.mothers, ivr.mother) || list[0]; if (m) ivr.mother = m.id;
     return `<h1>Phone demo: the mother's weekly call</h1><p class="sub">Shows what a mother hears on a basic phone. A danger sign pressed here creates a real alert for her Maa Bondhu.</p>
       ${list.length ? `<div class="tools"><label for="im" style="margin:0">Mother</label><select id="im">${list.map(x => `<option value="${x.id}" ${x.id === ivr.mother ? "selected" : ""}>${esc(x.full_name)}, week ${week(x.edd)}</option>`).join("")}</select></div>
-      <div class="two"><div class="phone"><div class="scr"><div class="w">${ivr.st === "idle" ? esc(m.full_name) : "MaaPushti"}</div><div>${{ idle: "Weekly call due", ask: "On call", anc: "On call", over: "Call ended" }[ivr.st]}</div><div class="big" id="ib"></div></div>
-        <div class="calls"><button style="background:#2f8f5b" id="ia" ${ivr.st === "ask" || ivr.st === "anc" ? "disabled" : ""}>Answer</button><button style="background:#c9402b" id="ie">End</button></div>
+      <div class="two"><div class="phone"><div class="scr"><div class="w">${ivr.st === "idle" ? esc(m.full_name) : "MaaPushti"}</div><div>${{ idle: "Weekly call due", ask: "On call", anc: "On call", basket: "On call", over: "Call ended" }[ivr.st]}</div><div class="big" id="ib"></div></div>
+        <div class="calls"><button style="background:#2f8f5b" id="ia" ${["ask", "anc", "basket"].includes(ivr.st) ? "disabled" : ""}>Answer</button><button style="background:#c9402b" id="ie">End</button></div>
         <div class="keys">${"123456789*0#".split("").map(k => `<button data-k="${k}">${k}</button>`).join("")}</div></div>
       <div class="card"><b>Call transcript</b><ul class="tx">${ivr.lines.map(l => `<li class="${l[0]}">${esc(l[1])}</li>`).join("") || `<li>Press Answer to start the call.</li>`}</ul>
-        <p class="note">Keys: 1 bleeding, 2 swelling, 3 severe headache or fits, 4 fever, 5 baby moving less, 9 all well.</p></div></div>` : `<p class="empty">Register a mother first.</p>`}`;
+        <p class="note">Keys: 1 bleeding, 2 swelling, 3 severe headache or fits, 4 fever, 5 baby moving less, 9 all well. Then 1 to finish, and the basket choice by number.</p></div></div>` : `<p class="empty">Register a mother first.</p>`}`;
   }
   bind.ivr = () => {
     const s = $("#im"); if (!s) return;
     const m = byId(D.mothers, ivr.mother);
     const say = (c, t) => ivr.lines.push([c, t]);
+    const tx = $(".tx"); if (tx) tx.scrollTop = tx.scrollHeight;
     s.onchange = () => { ivr = { st: "idle", mother: s.value, lines: [] }; render(); };
     $("#ia").onclick = () => { ivr.lines = []; ivr.st = "ask"; const w = week(m.edd);
       say("", `MaaPushti: Hello ${m.full_name.split(" ")[0]}. You are in week ${w} of your pregnancy.`);
@@ -366,24 +393,198 @@
           await guard(load); ivr.st = "anc"; }
         else if (k === "9") { say("m", "Mother pressed 9: all is well."); say("", "MaaPushti: Glad to hear that."); ivr.st = "anc"; }
         if (ivr.st === "anc") say("", m.next_checkup ? `Your next checkup is on ${fmtD(m.next_checkup)}. Press 1 if you will remember.` : "Ask your Maa Bondhu for your next checkup date. Press 1 to finish.");
-      } else if (ivr.st === "anc" && k === "1") { say("m", "Mother pressed 1."); say("", "MaaPushti: Thank you. Take care. We will call again next week."); ivr.st = "over"; }
+      } else if (ivr.st === "anc" && k === "1") { say("m", "Mother pressed 1.");
+        const cur = currentOrder(m.id);
+        if (!m.shop_id) { say("", "MaaPushti: Thank you. Your Maa Bondhu will help you choose a shop for the Pushti Basket. Take care."); ivr.st = "over"; }
+        else if (cur) { say("", `MaaPushti: Your Pushti Basket for ${fmtDay(cur.pickup_date)} is already ordered: ${itemsText(cur).toLowerCase()}, ${cur.total} taka. Take care. We will call again next week.`); ivr.st = "over"; }
+        else { say("", `MaaPushti: This Friday's Pushti Basket has eggs, dal, greens and small fish for ${BASKET} taka. Add one item? ${D.choices.slice(0, 5).map((c, i) => (i ? "" : "Press ") + (i + 1) + " for " + c.name.split(/[,:]/)[0].toLowerCase()).join(", ")}. Press 0 for no extra item. Press # if you don't want a basket this week.`); ivr.st = "basket"; }
+      } else if (ivr.st === "basket" && (/[0-5]/.test(k) || k === "#")) {
+        if (k === "#") { say("m", "Mother pressed #: no basket this week."); say("", "MaaPushti: All right. Take care. We will call again next week."); }
+        else { const c = +k ? D.choices[+k - 1] : null; say("m", c ? `Mother pressed ${k}: ${c.name.split(":")[0]}` : "Mother pressed 0: core basket only.");
+          const o = await guard(() => api.addOrder({ mother_id: m.id, items: c ? [c.code] : [], source: "call" }));
+          if (o) { say("d", `Order sent to ${(byId(D.profiles, o.shop_id) || {}).shop_name || "her shop"}: ${o.total} taka, pickup ${fmtDay(o.pickup_date)}.`);
+            say("", o.deposit ? `MaaPushti: Your basket costs ${o.total} taka. Please pay ${o.deposit} taka at the shop or by bKash before Wednesday to keep it. It is part of the price. Take care.` : `MaaPushti: Your basket costs ${o.total} taka. Pick it up on Friday at the shop. Take care.`);
+            await guard(load); }
+          else say("d", "Could not place the order.");
+        }
+        ivr.st = "over"; }
       render(); $("#ib").textContent = k;
     });
+  };
+
+  // ---------- basket choice and pre-orders (family, Maa Bondhu, admin) ----------
+  function orderCard(o, canAct) {
+    const shop = byId(D.profiles, o.shop_id) || {}, r = me().role, open = o.status === "awaiting_deposit" || o.status === "confirmed";
+    const cancelOk = canAct && open && !(o.status === "confirmed" && o.deposit > 0) && !(r === "family" && Date.now() > cutoffOf(o.pickup_date).getTime() + 864e5 - 1);
+    return `<div class="card order"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div><b style="font-size:18px">Basket for ${esc(fmtDay(o.pickup_date))}</b> ${ostTag(o)}<div class="note">${esc(shop.shop_name || "Village shop")} · ordered ${ago(o.created_at)} by ${esc({ family: "family", call: "phone call", maa_bondhu: "Maa Bondhu" }[o.source])}</div></div>
+        <div style="text-align:right"><b style="font-size:22px">৳${o.total}</b><div class="note">${o.deposit ? `Deposit ৳${o.deposit}, part of the price` : "No deposit needed"}</div></div></div>
+      <ul class="items">${CORE.map(c => `<li>${esc(c[0])}, ${esc(c[1])}</li>`).join("")}${(o.items || []).map(i => `<li class="x">${esc(i.name)} <span class="note">৳${i.price}</span></li>`).join("")}</ul>
+      ${o.status === "awaiting_deposit" ? (canAct ? `<div class="soft-box"><b>Pay the BDT ${o.deposit} deposit to confirm.</b> It is the first instalment of this basket, not an extra charge.
+          ${callNo(shop) ? `<br>bKash or Nagad to the shop: <b>${esc(callNo(shop))}</b>, or pay cash at the shop.` : " Pay at the shop."}
+          ${o.deposit_ref ? `<p style="margin:8px 0 0">Sent by ${esc(o.deposit_method)}, reference <b>${esc(o.deposit_ref)}</b>. The shop will confirm it.</p>` : `
+          <form class="grid" data-dep="${o.id}" style="margin-top:10px"><div class="f"><label>Paid by</label><select name="deposit_method"><option>bKash</option><option>Nagad</option></select></div>
+            <div class="f"><label>Transaction ID</label><input name="deposit_ref" required placeholder="e.g. 8KD2XQ7"></div><div style="align-self:end"><button class="btn pri">I have paid</button></div></form>`}</div>`
+          : `<p class="note">Waiting for the BDT ${o.deposit} deposit${o.deposit_ref ? ` (family says paid by ${esc(o.deposit_method)}, ref ${esc(o.deposit_ref)})` : ""}.</p>`) : ""}
+      ${o.status === "missed" ? `<p class="note">Not picked up. Any deposit stays as credit for the next basket.</p>` : ""}
+      ${cancelOk ? `<div class="acts" style="margin-top:10px"><button class="btn sm" data-cancel="${o.id}">Cancel this order</button></div>` : ""}</div>`;
+  }
+  function basketPicker(m) {
+    const cur = currentOrder(m.id), pd = nextPickup(), trusted = pickups(m.id) >= 3, hist = ordersOf(m.id).filter(o => o !== cur);
+    const shop = byId(D.profiles, m.shop_id);
+    let body;
+    if (!m.shop_id) body = `<p class="empty">No Pushti Basket shop is set for ${esc(m.full_name)} yet. ${me().role === "family" ? "Ask her Maa Bondhu to choose the nearest shop." : "Choose a shop for her first."}</p>`;
+    else if (cur) body = orderCard(cur, true);
+    else body = `<form id="bf" class="card">
+      <p style="margin-top:0"><b>Pickup: ${esc(fmtDay(pd))}</b> at ${esc((shop && shop.shop_name) || "her village shop")}. Orders for this Friday close on <b>${esc(fmtDay(ymd(cutoffOf(pd))))}</b> night.</p>
+      <h3>Always in the basket (BDT ${BASKET}) 🔒</h3>
+      <ul class="items">${CORE.map(c => `<li>${esc(c[0])}, ${esc(c[1])} <span class="note">${esc(c[3])}</span></li>`).join("")}</ul>
+      <p class="note" style="margin-top:0">These are the foods every pregnant mother needs, so they can't be removed.</p>
+      <h3>Add her choice (up to 3)</h3>
+      <div class="choices">${D.choices.map(c => `<label class="choice"><input type="checkbox" name="c" value="${c.code}" data-p="${c.price}" data-per="${c.perishable ? 1 : 0}">
+        <span><b>${esc(c.name)}</b> <span class="price">+৳${c.price}</span><br><span class="note">${esc(c.why || "")}</span></span></label>`).join("")}</div>
+      <div class="total"><div><b style="font-size:24px" id="bt">৳${BASKET}</b><div class="note" id="bd"></div></div><button class="btn pri">Place order</button></div></form>`;
+    return body + (hist.length ? `<h2>Earlier orders</h2><div class="scroll"><table class="stack"><thead><tr><th>Pickup</th><th>Items</th><th class="num">Price</th><th>Status</th></tr></thead><tbody>
+      ${hist.map(o => `<tr><td data-l="Pickup">${fmtD(o.pickup_date)}</td><td data-l="Items">${esc(itemsText(o))}</td><td class="num" data-l="Price">৳${o.total}</td><td data-l="Status">${ostTag(o)}</td></tr>`).join("")}</tbody></table></div>` : "")
+      + `<p class="note" style="margin-top:14px">${trusted ? "This family has picked up 3 or more baskets, so no deposit is needed." : "A BDT 40 deposit is asked only when fresh fruit is chosen, until the family has picked up 3 baskets. The deposit is the first instalment of the price."}</p>`;
+  }
+  function bindBasket(root, m, after) {
+    const f = root.querySelector("#bf");
+    if (f) {
+      const boxes = [...f.querySelectorAll("[name=c]")], trusted = pickups(m.id) >= 3;
+      const upd = () => { const on = boxes.filter(b => b.checked), tot = BASKET + on.reduce((t, b) => t + +b.dataset.p, 0), dep = !trusted && on.some(b => b.dataset.per === "1");
+        boxes.forEach(b => { b.disabled = !b.checked && on.length >= 3; b.closest(".choice").classList.toggle("on", b.checked); });
+        f.querySelector("#bt").textContent = "৳" + tot;
+        f.querySelector("#bd").textContent = dep ? "BDT 40 deposit to confirm, part of the price" : "No deposit needed"; };
+      boxes.forEach(b => b.onchange = upd); upd();
+      f.onsubmit = async e => { e.preventDefault(); const codes = boxes.filter(b => b.checked).map(b => b.value);
+        const o = await guard(() => api.addOrder({ mother_id: m.id, items: codes, source: me().role === "family" ? "family" : "maa_bondhu" }));
+        if (!o) return; toast(o.status === "awaiting_deposit" ? "Order placed. Pay the BDT 40 deposit to confirm." : "Order confirmed for " + fmtDay(o.pickup_date)); await guard(load); after(); };
+    }
+    root.querySelectorAll("[data-dep]").forEach(x => x.onsubmit = async e => { e.preventDefault(); const v = form(x);
+      await guard(() => api.updateOrder(x.dataset.dep, { deposit_method: v.deposit_method, deposit_ref: v.deposit_ref.trim() }), "Thank you. The shop will confirm your deposit."); await guard(load); after(); });
+    root.querySelectorAll("[data-cancel]").forEach(b => b.onclick = async () => { await guard(() => api.updateOrder(b.dataset.cancel, { status: "cancelled" }), "Order cancelled"); await guard(load); after(); });
+  }
+  function orderModal(id) {
+    const m = byId(D.mothers, id); if (!m) return; openMother = id;
+    const el = modal(`<h1>Pushti Basket for ${esc(m.full_name)}</h1><p class="sub">Order on her behalf, for example when nobody at home can read. <a href="#" id="bk">Back to her record</a></p>${basketPicker(m)}`);
+    el.querySelector("#bk").onclick = e => { e.preventDefault(); motherModal(id); };
+    bindBasket(el, m, () => orderModal(id));
+  }
+
+  // ---------- family dashboard ----------
+  const fMother = () => D.mothers.find(m => m.id === me().mother_id);
+  function familyHome() {
+    const m = fMother(); if (!m) return `<h1>Our mother</h1><p class="empty">This login is not linked to a mother. Ask the Maa Bondhu.</p>`;
+    const w = week(m.edd), mb = byId(D.profiles, m.maa_bondhu_id) || {}, shop = byId(D.profiles, m.shop_id), d = dayDiff(m.next_checkup), cur = currentOrder(m.id);
+    const s = D.sales.filter(x => x.mother_id === m.id), due = s.filter(x => x.kind === "basket").reduce((t, x) => t + basketPrice(x), 0) - s.filter(x => x.kind === "payment").reduce((t, x) => t + x.amount, 0);
+    const adv = D.consults.filter(c => c.mother_id === m.id && c.doctor_notes), mine = D.alerts.filter(a => a.mother_id === m.id && a.source === "family").slice(0, 3);
+    const tips = w <= 13 ? ["Give her an egg, a bowl of dal and green vegetables every day.", "Make sure she takes her folic acid or iron tablet.", "If she feels sick, give small meals often."]
+      : w <= 27 ? ["Give her one extra meal a day: she is eating for two.", "An egg, dal, green vegetables and small fish every day.", "Iron tablet daily; squeeze lemon on her dal so her body takes in the iron."]
+      : ["Let her rest, lying on her left side.", "Keep money and transport ready for the delivery, at a health facility.", "Keep giving an egg, dal, greens and fish every day."];
+    return `<h1>${esc(m.full_name)}'s family</h1><p class="sub">You are signed in as her ${esc((me().relation || "family member").toLowerCase())}. Her weekly phone call still comes to her directly.</p>
+      <div class="card preg"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><div><b style="font-size:22px">Week ${w} of 40</b> <span class="note">${tri(w)} trimester</span></div><div class="note">Baby due ${fmtD(m.edd)}</div></div>
+        <div class="bar"><i style="width:${Math.min(100, w / 40 * 100)}%"></i></div></div>
+      <div class="kpis" style="margin-top:12px"><div class="kpi ${d != null && d < 0 ? "hot" : ""}"><b style="font-size:22px">${m.next_checkup ? fmtD(m.next_checkup) : "Ask Maa Bondhu"}</b><span>Next checkup${d != null && d < 0 ? " (overdue)" : ""}</span></div>
+        <div class="kpi"><b style="font-size:22px">${cur ? OST[cur.status][0] : "Not ordered"}</b><span>Basket for ${esc(fmtDay(nextPickup()).split(",")[0])}</span></div>
+        <div class="kpi"><b style="font-size:22px">${due > 0 ? "৳" + due : due < 0 ? "৳" + -due + " credit" : "Clear"}</b><span>Basket khata</span></div></div>
+      <div class="two" style="margin-top:16px"><div class="card"><b>How you can help this week</b><ul>${tips.map(t => `<li>${esc(t)}</li>`).join("")}</ul>
+          <a class="btn pri sm" href="#basket">${cur ? "See this week's basket" : "Order this week's basket"}</a></div>
+        <div class="card"><b>Her Maa Bondhu</b><div style="display:flex;gap:12px;align-items:center;margin-top:8px">${av(mb, 48)}<div><b>${esc(mb.full_name || "-")}</b><div class="note">${esc(loc(mb))}</div></div></div>
+          <div class="acts" style="margin-top:10px">${callNo(mb) ? `<a class="btn call sm" href="${telHref(callNo(mb))}">Call Maa Bondhu</a>` : ""}${shop && callNo(shop) ? `<a class="btn sm" href="${telHref(callNo(shop))}">Call ${esc(shop.shop_name || "shop")}</a>` : ""}</div></div></div>
+      <h2>Danger signs: act at once</h2>
+      <div class="card danger"><p style="margin-top:0">If she has any of these, tell her Maa Bondhu now. For bleeding or fits, take her to the health centre straight away.</p>
+        <div class="signs">${SIGNS.map((g, i) => `<button class="btn" data-sign="${i}"><span class="num">${i + 1}</span>${esc(g)}</button>`).join("")}</div>
+        ${mine.length ? `<p class="note" style="margin-bottom:0">You reported: ${mine.map(a => esc(a.sign) + " (" + ago(a.created_at) + ", " + (a.status === "open" ? "Maa Bondhu alerted" : "visited") + ")").join("; ")}</p>` : ""}</div>
+      <h2>Doctor's advice</h2>${adv.length ? `<ul class="tl">${adv.map(c => `<li class="co"><b>${esc(pName(c.doctor_id))}</b>: ${esc(c.doctor_notes)}<br><small>${fmtD(c.created_at)}</small></li>`).join("")}</ul>` : `<p class="empty">No doctor consultations yet.</p>`}`;
+  }
+  bind.family = () => {
+    const m = fMother(); if (!m) return;
+    document.querySelectorAll("[data-sign]").forEach(b => b.onclick = async () => {
+      const sign = SIGNS[+b.dataset.sign];
+      if (!confirmBox(b, "Send \"" + sign + "\" to her Maa Bondhu?")) return;
+      const a = await guard(() => api.addAlert({ mother_id: m.id, sign, source: "family", note: "Reported by " + me().full_name }));
+      if (!a) return; toast("Her Maa Bondhu has been alerted and will contact you."); await guard(load); render();
+    });
+  };
+  // two-tap confirm without a browser dialog
+  function confirmBox(b, msg) { if (b.dataset.armed) return true; b.dataset.armed = "1"; b.classList.add("armed"); const t = b.innerHTML; b.innerHTML = "Tap again to send"; b.title = msg;
+    setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.classList.remove("armed"); b.innerHTML = t; } }, 4000); return false; }
+  function familyBasket() {
+    const m = fMother(); if (!m) return `<p class="empty">This login is not linked to a mother.</p>`;
+    return `<h1>Pushti Basket</h1><p class="sub">Choose what goes into ${esc(m.full_name.split(" ")[0])}'s basket this week. The core foods are always included.</p>${basketPicker(m)}`;
+  }
+  bind.basket = () => { const m = fMother(); if (m) bindBasket($("#main"), m, render); };
+
+  // ---------- family logins (Maa Bondhu and admin, from the mother's record) ----------
+  function familySection(m) {
+    const fam = D.profiles.filter(p => p.role === "family" && p.mother_id === m.id);
+    return `<h2>Family dashboard login</h2>
+      ${fam.length ? `<ul class="tl">${fam.map(p => `<li><b>${esc(p.full_name)}</b> (${esc((p.relation || "family").toLowerCase())}) signs in with ${esc(p.phone)} ${p.active ? tag("Active", "t-ok") : tag("Turned off", "t-mut")}</li>`).join("")}</ul>` : `<p class="note">No family login yet. Give one only to a family member who can read.</p>`}
+      <details${fam.length ? "" : " open"}><summary class="btn sm" style="display:inline-flex">+ Add family login</summary>
+      <form class="grid" id="ff" style="margin-top:10px">
+        <div class="f"><label for="ff1">Name *</label><input id="ff1" name="full_name" required></div>
+        <div class="f"><label for="ff2">Relation</label><select id="ff2" name="relation">${RELS.map(r => `<option>${r}</option>`).join("")}</select></div>
+        <div class="f"><label for="ff3">Mobile number (login) *</label><input id="ff3" name="phone" inputmode="tel" required pattern="0?1[0-9]{9}" placeholder="01XXXXXXXXX"></div>
+        <div class="f"><label for="ff4">Password * (min 6)</label><input id="ff4" name="password" required minlength="6"></div>
+        <label class="check f full"><input type="checkbox" required> ${esc(m.full_name)} agrees that this person can see her pregnancy details and order her basket.</label>
+        <div><button class="btn pri">Create family login</button></div></form></details>`;
+  }
+  function bindFamilySection(el, m) {
+    const f = el.querySelector("#ff"); if (!f) return;
+    f.onsubmit = async e => { e.preventDefault(); const v = form(f); v.phone = v.phone.replace(/\D/g, "");
+      const u = await guard(() => api.createUser({ ...v, role: "family", mother_id: m.id, area: null })); if (!u) return;
+      toast(`Family login created. ${u.full_name} signs in with ${u.phone}.`); await guard(load); motherModal(m.id); };
+  }
+
+  // ---------- shopkeeper: pre-orders ----------
+  let shopDay = null;
+  function shopOrders() {
+    const days = [...new Set(D.orders.map(o => o.pickup_date))].sort().reverse(), np = nextPickup();
+    if (!days.includes(np)) days.unshift(np);
+    const day = shopDay && days.includes(shopDay) ? shopDay : np;
+    const list = D.orders.filter(o => o.pickup_date === day).sort((a, b) => (a.status === "cancelled") - (b.status === "cancelled") || mName(a.mother_id).localeCompare(mName(b.mother_id)));
+    const live = list.filter(o => o.status !== "cancelled"), count = {};
+    live.forEach(o => (o.items || []).forEach(i => { count[i.name] = (count[i.name] || 0) + 1; }));
+    return `<h1>Pre-orders</h1><p class="sub">Baskets families have ordered. Orders for a Friday close on Wednesday night, so you know what to stock.</p>
+      <div class="tools">${days.slice(0, 6).map(d => `<button class="chip ${d === day ? "on" : ""}" data-day="${d}">${d === np ? "This " : ""}${esc(fmtDay(d))}</button>`).join("")}</div>
+      <div class="two"><div class="card soft"><b>Stock list for ${esc(fmtDay(day))}</b><ul><li><b>${live.length}</b> core baskets: ${live.length * 7} eggs, ${live.length * 0.5} kg lentils, ${live.length * 2} bunches of greens, ${live.length * 0.25} kg small fish</li>
+        ${Object.entries(count).map(([n, k]) => `<li><b>${k}</b> × ${esc(n)}</li>`).join("")}</ul></div>
+        <div class="kpis" style="align-content:start"><div class="kpi"><b>${live.filter(o => o.status === "awaiting_deposit").length}</b><span>Waiting for deposit</span></div><div class="kpi"><b>${live.filter(o => o.status === "confirmed").length}</b><span>Ready to hand over</span></div>
+          <div class="kpi"><b>৳${live.reduce((t, o) => t + o.total, 0).toLocaleString("en-IN")}</b><span>Basket value</span></div></div></div>
+      ${list.length ? `<div class="scroll" style="margin-top:12px"><table class="stack"><thead><tr><th>Family</th><th>Extras</th><th class="num">Price</th><th>Deposit</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+      ${list.map(o => `<tr><td data-l="Family"><b>${esc(mName(o.mother_id))}</b><div class="note">by ${esc({ family: "family", call: "phone call", maa_bondhu: "Maa Bondhu" }[o.source])}</div></td>
+        <td data-l="Extras">${esc(itemsText(o))}</td><td class="num" data-l="Price">৳${o.total}</td>
+        <td data-l="Deposit">${o.deposit ? `৳${o.deposit}${o.status === "awaiting_deposit" ? (o.deposit_ref ? `<div class="note">${esc(o.deposit_method)} ref <b>${esc(o.deposit_ref)}</b></div>` : `<div class="note">Not paid yet</div>`) : `<div class="note">Received${o.deposit_method ? " by " + esc(o.deposit_method) : ""}</div>`}` : "None"}</td>
+        <td data-l="Status">${ostTag(o)}</td>
+        <td data-l="Actions"><div class="acts">${o.status === "awaiting_deposit" ? `${o.deposit_method ? "" : `<select data-dm="${o.id}" aria-label="Paid by" style="width:auto;min-height:36px;padding:4px 8px"><option>Cash</option><option>bKash</option><option>Nagad</option></select>`}<button class="btn sm pri" data-ok="${o.id}">Deposit received</button>`
+          : o.status === "confirmed" ? `<button class="btn sm pri" data-pick="${o.id}">Picked up</button><button class="btn sm" data-miss="${o.id}">Missed</button>` : ""}</div></td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="empty">No orders for this day yet.</p>`}
+      <p class="note">Picked up adds the basket to the family's khata at its price. The deposit counts as their first payment. Missed tells the Maa Bondhu to check on the mother; any deposit stays as credit.</p>`;
+  }
+  bind.orders = () => {
+    document.querySelectorAll("[data-day]").forEach(b => b.onclick = () => { shopDay = b.dataset.day; render(); });
+    document.querySelectorAll("[data-ok]").forEach(b => b.onclick = async () => { const s = document.querySelector(`[data-dm="${b.dataset.ok}"]`);
+      await guard(() => api.updateOrder(b.dataset.ok, { status: "confirmed", ...(s ? { deposit_method: s.value } : {}) }), "Deposit received. Order confirmed."); await refresh(); });
+    document.querySelectorAll("[data-pick]").forEach(b => b.onclick = async () => { await guard(() => api.updateOrder(b.dataset.pick, { status: "picked_up" }), "Basket handed over and added to the khata"); await refresh(); });
+    document.querySelectorAll("[data-miss]").forEach(b => b.onclick = async () => { if (!confirmBox(b, "Mark as missed?")) return; await guard(() => api.updateOrder(b.dataset.miss, { status: "missed" }), "Marked missed. The Maa Bondhu will check on her."); await refresh(); });
   };
 
   // ---------- admin ----------
   function adminOverview() {
     const P = D.profiles, c = r => P.filter(p => p.role === r && p.active).length, oa = D.alerts.filter(a => a.status === "open");
-    const due = D.sales.filter(s => s.kind === "basket").length * BASKET - D.sales.filter(s => s.kind === "payment").reduce((t, s) => t + s.amount, 0);
+    const due = D.sales.filter(s => s.kind === "basket").reduce((t, s) => t + basketPrice(s), 0) - D.sales.filter(s => s.kind === "payment").reduce((t, s) => t + s.amount, 0);
+    const ow = D.orders.filter(o => o.pickup_date === nextPickup() && o.status !== "cancelled");
     return `<h1>Admin overview</h1><p class="sub">All of MaaPushti at a glance.</p>
       <div class="kpis"><div class="kpi"><b>${D.mothers.length}</b><span>Mothers registered</span></div><div class="kpi ${oa.length ? "hot" : ""}"><b>${oa.length}</b><span>Open danger signs</span></div>
       <div class="kpi"><b>${c("maa_bondhu")}</b><span>Maa Bondhus</span></div><div class="kpi"><b>${c("doctor")}</b><span>Gynecologists</span></div><div class="kpi"><b>${c("shopkeeper")}</b><span>Shops</span></div>
-      <div class="kpi"><b>${D.consults.length}</b><span>Consultations</span></div><div class="kpi"><b>${D.sales.filter(s => s.kind === "basket").length}</b><span>Baskets sold</span></div><div class="kpi"><b>৳${due.toLocaleString("en-IN")}</b><span>Basket payments due</span></div></div>
+      <div class="kpi"><b>${D.consults.length}</b><span>Consultations</span></div><div class="kpi"><b>${D.sales.filter(s => s.kind === "basket").length}</b><span>Baskets sold</span></div><div class="kpi"><b>৳${due.toLocaleString("en-IN")}</b><span>Basket payments due</span></div>
+      <div class="kpi"><b>${ow.length}</b><span>Orders for ${esc(fmtDay(nextPickup()).split(",")[0])}</span></div><div class="kpi"><b>${c("family")}</b><span>Family logins</span></div></div>
       <h2>Open danger-sign alerts</h2>${alertList(oa)}`;
   }
   function adminUsers() {
     const P = D.profiles;
-    return `<h1>Users</h1><p class="sub">Create logins for Maa Bondhus, shopkeepers and gynecologists. Each person signs in with their phone number and the password you set.</p>
+    return `<h1>Users</h1><p class="sub">Create logins for Maa Bondhus, shopkeepers and gynecologists. Each person signs in with their phone number and the password you set. Family logins are made from the mother's page, with her consent.</p>
       <form class="grid card" id="uf">
         <div class="f"><label for="u1">Role *</label><select id="u1" name="role"><option value="maa_bondhu">Maa Bondhu (health worker)</option><option value="shopkeeper">Shopkeeper</option><option value="doctor">Gynecologist</option><option value="admin">Admin</option></select></div>
         <div class="f"><label for="u2">Full name *</label><input id="u2" name="full_name" required></div>
@@ -397,7 +598,7 @@
         <div><button class="btn pri">Create login</button></div></form>
       <h2>All users (${P.length})</h2><div class="scroll"><table class="stack"><thead><tr><th>Name</th><th>Role</th><th>Phone (login)</th><th>Details</th><th class="num">Mothers</th><th>Status</th><th></th></tr></thead><tbody>
       ${P.map(p => `<tr><td data-l="Name"><b>${esc(p.full_name)}</b></td><td data-l="Role">${ROLE[p.role]}</td><td data-l="Phone">${esc(p.phone)}</td>
-        <td data-l="Details">${[p.shop_name || p.hospital, loc(p)].filter(Boolean).map(esc).join("<br>")}</td><td class="num" data-l="Mothers">${p.role === "maa_bondhu" ? D.mothers.filter(m => m.maa_bondhu_id === p.id).length : p.role === "shopkeeper" ? D.mothers.filter(m => m.shop_id === p.id).length : ""}</td>
+        <td data-l="Details">${p.role === "family" ? "Family of " + esc(mName(p.mother_id)) + (p.relation ? " (" + esc(p.relation.toLowerCase()) + ")" : "") : [p.shop_name || p.hospital, loc(p)].filter(Boolean).map(esc).join("<br>")}</td><td class="num" data-l="Mothers">${p.role === "maa_bondhu" ? D.mothers.filter(m => m.maa_bondhu_id === p.id).length : p.role === "shopkeeper" ? D.mothers.filter(m => m.shop_id === p.id).length : ""}</td>
         <td data-l="Status">${p.active ? tag("Active", "t-ok") : tag("Turned off", "t-mut")}</td>
         <td data-l=""><div class="acts"><button class="btn sm" data-edit="${p.id}">Edit</button>${p.id !== me().id ? `<button class="btn sm" data-tog="${p.id}">${p.active ? "Turn off" : "Turn on"}</button>` : ""}</div></td></tr>`).join("")}</tbody></table></div>`;
   }
@@ -434,12 +635,12 @@
 
   // ---------- shopkeeper ----------
   function ledgerRows() {
-    return D.customers.map(c => { const s = D.sales.filter(x => x.mother_id === c.id), b = s.filter(x => x.kind === "basket").length, paid = s.filter(x => x.kind === "payment").reduce((t, x) => t + x.amount, 0); return { ...c, b, paid, due: b * BASKET - paid }; });
+    return D.customers.map(c => { const s = D.sales.filter(x => x.mother_id === c.id), b = s.filter(x => x.kind === "basket").length, paid = s.filter(x => x.kind === "payment").reduce((t, x) => t + x.amount, 0); return { ...c, b, paid, due: s.filter(x => x.kind === "basket").reduce((t, x) => t + basketPrice(x), 0) - paid }; });
   }
   function shopRecord() {
     const rows = ledgerRows(), sold = rows.reduce((t, r) => t + r.b, 0), paid = rows.reduce((t, r) => t + r.paid, 0);
     return `<h1>${esc(me().shop_name || "My shop")}</h1><p class="sub">Record Pushti Baskets and instalments. You see only the families assigned to your shop, not their health details.</p>
-      <div class="kpis"><div class="kpi"><b>${rows.length}</b><span>Families</span></div><div class="kpi"><b>${sold}</b><span>Baskets given</span></div><div class="kpi"><b>৳${paid.toLocaleString("en-IN")}</b><span>Collected</span></div><div class="kpi"><b>৳${Math.round(sold * BASKET * 0.1).toLocaleString("en-IN")}</b><span>Your margin (10%)</span></div></div>
+      <div class="kpis"><div class="kpi"><b>${rows.length}</b><span>Families</span></div><div class="kpi"><b>${sold}</b><span>Baskets given</span></div><div class="kpi"><b>৳${paid.toLocaleString("en-IN")}</b><span>Collected</span></div><div class="kpi"><b>৳${Math.round(D.sales.filter(x => x.kind === "basket").reduce((t, x) => t + basketPrice(x), 0) * 0.1).toLocaleString("en-IN")}</b><span>Your margin (10%)</span></div></div>
       <div class="two" style="margin-top:16px"><form class="card" id="sf">
         <div class="f"><label for="s1">Family</label><select id="s1" name="mother_id" required>${rows.map(r => `<option value="${r.id}">${esc(r.full_name)}, ${esc(r.village)}</option>`).join("")}</select></div>
         <div class="f" style="margin-top:10px"><label for="s2">Type</label><select id="s2" name="kind"><option value="basket">Basket given (BDT 280 added to due)</option><option value="payment">Payment received</option></select></div>
@@ -447,7 +648,8 @@
         <div class="acts" style="margin-top:8px">${[40, 70, 140, 280].map(a => `<button type="button" class="chip" data-a="${a}">৳${a}</button>`).join("")}</div>
         <div class="f" style="margin-top:10px"><label for="s4">Paid by</label><select id="s4" name="method"><option>bKash</option><option>Nagad</option><option>Cash</option></select></div>
         <button class="btn pri" style="margin-top:12px" ${rows.length ? "" : "disabled"}>Save</button></form>
-      <div class="card soft"><b>This week's Pushti Basket: BDT 280</b><ul><li>Eggs x7 (BDT 105)</li><li>Red lentils 500 g (BDT 65)</li><li>Leafy greens, 2 bunches (BDT 40)</li><li>Small fish 250 g (BDT 70)</li></ul><p class="note">Sample prices.</p></div></div>`;
+      <div class="card soft"><b>Core Pushti Basket: BDT 280</b><ul>${CORE.map(c => `<li>${c[0]}, ${c[1]} (BDT ${c[2]})</li>`).join("")}</ul>
+        <b>Extras families can choose</b><ul>${D.choices.map(c => `<li>${esc(c.name)} (BDT ${c.price})</li>`).join("")}</ul><p class="note">Walk-in sale without a pre-order: record it here. Pre-ordered baskets are handed over from the Pre-orders tab. Sample prices.</p></div></div>`;
   }
   bind.record = () => {
     const f = $("#sf"); if (!f) return;
@@ -467,7 +669,7 @@
     const rows = ledgerRows().sort((a, b) => b.due - a.due);
     return `<h1>Khata</h1><p class="sub">What each family has bought and still owes.</p>
       ${rows.length ? `<div class="scroll"><table class="stack"><thead><tr><th>Family</th><th>Village</th><th class="num">Baskets</th><th class="num">Paid</th><th class="num">Due</th></tr></thead><tbody>
-      ${rows.map(r => `<tr><td data-l="Family"><b>${esc(r.full_name)}</b></td><td data-l="Village">${esc(r.village)}</td><td class="num" data-l="Baskets">${r.b}</td><td class="num" data-l="Paid">৳${r.paid}</td><td class="num" data-l="Due">${r.due > 0 ? `<b style="color:var(--red)">৳${r.due}</b>` : "Clear"}</td></tr>`).join("")}</tbody></table></div>
+      ${rows.map(r => `<tr><td data-l="Family"><b>${esc(r.full_name)}</b></td><td data-l="Village">${esc(r.village)}</td><td class="num" data-l="Baskets">${r.b}</td><td class="num" data-l="Paid">৳${r.paid}</td><td class="num" data-l="Due">${r.due > 0 ? `<b style="color:var(--red)">৳${r.due}</b>` : r.due < 0 ? `৳${-r.due} credit` : "Clear"}</td></tr>`).join("")}</tbody></table></div>
       <h2>Recent entries</h2><ul class="tl">${D.sales.slice(0, 12).map(s => `<li>${esc(mName(s.mother_id))}: ${s.kind === "basket" ? "basket given" : "paid ৳" + s.amount + " by " + esc(s.method)}<br><small>${ago(s.created_at)}</small></li>`).join("")}</ul>` : `<p class="empty">No families are assigned to your shop yet.</p>`}`;
   }
 
@@ -521,7 +723,7 @@
         <div><button class="btn pri">Save changes</button></div></form>
       <h2>Account details</h2>
       <div class="card kv" style="margin:0"><div><span>Login ID (phone)</span>${esc(u.phone)} 🔒</div><div><span>User ID</span><code style="font-size:13px">${esc(u.id.slice(0, 8))}</code> 🔒</div>
-        <div><span>Role</span>${ROLE[u.role]} 🔒</div><div><span>Location</span>${esc(loc(u) || "-")} 🔒</div></div>
+        <div><span>Role</span>${ROLE[u.role]} 🔒</div>${u.role === "family" ? `<div><span>Linked to</span>${esc(mName(u.mother_id))} 🔒</div>` : `<div><span>Location</span>${esc(loc(u) || "-")} 🔒</div>`}</div>
       <p class="note">🔒 These can't be changed here. Your login ID stays the same; ask the admin to change your role or location.</p>
       <h2>Change password</h2>
       <form class="grid card" id="pw"><div class="f"><label for="w1">New password (min 6)</label><input id="w1" name="p1" type="password" minlength="6" autocomplete="new-password" required></div>
